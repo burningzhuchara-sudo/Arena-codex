@@ -23,7 +23,7 @@ object Store {
     val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(45, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
     }
@@ -66,6 +66,8 @@ object Store {
         o.put("stamp", stamp); o.put("live", live)
         o.put("overlay", OverlayService.running)
         o.put("ocr", Ocr.ready())
+        o.put("ocrErr", Ocr.lastError)
+        o.put("ocrEngine", Ocr.engineInfo)
         o.put("lang", prefs.getString("ocr_lang", "rus"))
         return o.toString()
     }
@@ -241,10 +243,6 @@ object Store {
     }
 }
 
-/**
- * OCR-слой через reflection: работает и с tess-two, и с Tesseract4Android,
- * независимо от того, как называется метод освобождения (end/recycle) и геттер текста.
- */
 object Ocr {
     private var api: Any? = null
     private var lang: String = ""
@@ -252,21 +250,38 @@ object Ocr {
     private var mText: Method? = null
     private var mEnd: Method? = null
 
+    var lastError: String = ""
+    var engineInfo: String = ""
+
+    private const val CLS = "com.googlecode.tesseract.android.TessBaseAPI"
+
     fun dir(ctx: Context): File {
         val d = File(ctx.filesDir, "tessdata"); if (!d.exists()) d.mkdirs(); return d
     }
 
-    fun has(ctx: Context, l: String) = File(dir(ctx), "$l.traineddata").exists()
+    fun file(ctx: Context, l: String) = File(dir(ctx), "$l.traineddata")
+
+    fun has(ctx: Context, l: String): Boolean {
+        val f = file(ctx, l)
+        return f.exists() && f.length() > 100_000L
+    }
 
     fun ready() = api != null
 
-    suspend fun download(ctx: Context, l: String, onProgress: (Int) -> Unit) =
+    fun sourceUrl(l: String, source: String): String = when (source) {
+        "fast" -> "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$l.traineddata"
+        "legacy" -> "https://github.com/tesseract-ocr/tessdata/raw/3.04.00/$l.traineddata"
+        "best" -> "https://github.com/tesseract-ocr/tessdata_best/raw/main/$l.traineddata"
+        else -> "https://github.com/tesseract-ocr/tessdata/raw/main/$l.traineddata"
+    }
+
+    suspend fun download(ctx: Context, l: String, source: String, onProgress: (Int) -> Unit) =
         withContext(Dispatchers.IO) {
-            val url = "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$l.traineddata"
+            val url = sourceUrl(l, source)
             val req = Request.Builder().url(url).build()
             Store.http.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) throw IllegalStateException("HTTP " + r.code)
-                val body = r.body ?: throw IllegalStateException("empty body")
+                val body = r.body ?: throw IllegalStateException("пустой ответ")
                 val total = body.contentLength()
                 val tmp = File(dir(ctx), "$l.traineddata.tmp")
                 body.byteStream().use { input ->
@@ -278,59 +293,107 @@ object Ocr {
                         }
                     }
                 }
-                tmp.renameTo(File(dir(ctx), "$l.traineddata"))
+                if (tmp.length() < 100_000L) {
+                    tmp.delete(); throw IllegalStateException("файл слишком мал (${tmp.length()} Б) — источник недоступен")
+                }
+                val dst = file(ctx, l)
+                if (dst.exists()) dst.delete()
+                if (!tmp.renameTo(dst)) {
+                    tmp.copyTo(dst, overwrite = true); tmp.delete()
+                }
             }
             release()
+            lastError = ""
         }
 
     fun init(ctx: Context, l: String): Boolean {
         if (api != null && lang == l) return true
-        if (!has(ctx, l)) return false
-        return try {
-            release()
-            val cls = Class.forName("com.googlecode.tesseract.android.TessBaseAPI")
-            val a = cls.getDeclaredConstructor().newInstance()
-
-            val init = cls.getMethod("init", String::class.java, String::class.java)
-            val ok = (init.invoke(a, ctx.filesDir.absolutePath, l) as? Boolean) ?: false
-            if (!ok) {
-                safeEnd(cls, a)
-                false
-            } else {
-                mImage = cls.methods.firstOrNull {
-                    it.name == "setImage" && it.parameterCount == 1 &&
-                        it.parameterTypes[0] == Bitmap::class.java
-                }
-                mText = cls.methods.firstOrNull {
-                    (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0
-                }
-                mEnd = cls.methods.firstOrNull {
-                    (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
-                }
-                val psm = cls.methods.firstOrNull {
-                    it.name == "setPageSegMode" && it.parameterCount == 1 &&
-                        it.parameterTypes[0] == Int::class.javaPrimitiveType
-                }
-                try { psm?.invoke(a, 7) } catch (_: Throwable) {}
-
-                if (mImage == null || mText == null) {
-                    safeEnd(cls, a)
-                    false
-                } else {
-                    api = a; lang = l; true
-                }
-            }
-        } catch (_: Throwable) {
-            api = null; lang = ""; false
+        if (!has(ctx, l)) {
+            lastError = "Нет файла $l.traineddata (или он повреждён). Скачайте модель заново."
+            return false
         }
+        release()
+        val cls: Class<*>
+        try {
+            cls = Class.forName(CLS)
+        } catch (t: Throwable) {
+            lastError = "Класс Tesseract не найден: " + t.javaClass.simpleName + " / " + (t.message ?: "")
+            return false
+        }
+        val a: Any
+        try {
+            a = cls.getDeclaredConstructor().newInstance()
+        } catch (t: Throwable) {
+            lastError = "Не создан экземпляр: " + t.javaClass.simpleName + " / " + (t.cause?.message ?: t.message ?: "")
+            return false
+        }
+
+        val init2 = cls.methods.firstOrNull {
+            it.name == "init" && it.parameterCount == 2 &&
+                it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java
+        }
+        val init3 = cls.methods.firstOrNull {
+            it.name == "init" && it.parameterCount == 3 &&
+                it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java &&
+                it.parameterTypes[2] == Int::class.javaPrimitiveType
+        }
+        if (init2 == null && init3 == null) {
+            lastError = "В библиотеке нет метода init(String,String[,int])"
+            safeEnd(cls, a); return false
+        }
+
+        val path = ctx.filesDir.absolutePath
+        val attempts = ArrayList<Pair<String, () -> Boolean>>()
+        if (init3 != null) {
+            listOf(1, 0, 3, 2).forEach { oem ->
+                attempts.add("OEM $oem" to { (init3.invoke(a, path, l, oem) as? Boolean) ?: false })
+            }
+        }
+        if (init2 != null) attempts.add("default" to { (init2.invoke(a, path, l) as? Boolean) ?: false })
+
+        var ok = false; var used = ""; var err = ""
+        for ((label, run) in attempts) {
+            try {
+                if (run()) { ok = true; used = label; break } else err = "$label → false"
+            } catch (t: Throwable) {
+                err = "$label → " + t.javaClass.simpleName + ": " + (t.cause?.message ?: t.message ?: "")
+            }
+        }
+        if (!ok) {
+            lastError = "Движок не принял модель ($err). Нужна legacy-модель: кнопка «rus legacy»."
+            safeEnd(cls, a)
+            return false
+        }
+
+        mImage = cls.methods.firstOrNull {
+            it.name == "setImage" && it.parameterCount == 1 && it.parameterTypes[0] == Bitmap::class.java
+        }
+        mText = cls.methods.firstOrNull {
+            (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0
+        }
+        mEnd = cls.methods.firstOrNull {
+            (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
+        }
+        val psm = cls.methods.firstOrNull {
+            it.name == "setPageSegMode" && it.parameterCount == 1 &&
+                it.parameterTypes[0] == Int::class.javaPrimitiveType
+        }
+        try { psm?.invoke(a, 7) } catch (_: Throwable) {}
+
+        if (mImage == null || mText == null) {
+            lastError = "Нет методов setImage/getUTF8Text в библиотеке"
+            safeEnd(cls, a); return false
+        }
+
+        api = a; lang = l; engineInfo = used; lastError = ""
+        return true
     }
 
     private fun safeEnd(cls: Class<*>, a: Any) {
         try {
-            val m = cls.methods.firstOrNull {
+            cls.methods.firstOrNull {
                 (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
-            }
-            m?.invoke(a)
+            }?.invoke(a)
         } catch (_: Throwable) {}
     }
 
@@ -343,12 +406,33 @@ object Ocr {
                 img.invoke(a, bmp)
                 (txt.invoke(a) as? String ?: "").trim()
             }
-        } catch (_: Throwable) { "" }
+        } catch (t: Throwable) {
+            lastError = "Чтение кадра: " + t.javaClass.simpleName
+            ""
+        }
     }
 
     fun release() {
         val a = api
         if (a != null) { try { mEnd?.invoke(a) } catch (_: Throwable) {} }
         api = null; lang = ""; mImage = null; mText = null; mEnd = null
+    }
+
+    fun diag(ctx: Context): String {
+        val sb = StringBuilder()
+        sb.append("Класс Tesseract: ")
+        try { Class.forName(CLS); sb.append("найден\n") }
+        catch (t: Throwable) { sb.append("НЕ найден (").append(t.javaClass.simpleName).append(")\n") }
+        listOf("rus", "eng").forEach { l ->
+            val f = file(ctx, l)
+            sb.append(l).append(".traineddata: ")
+            if (f.exists()) sb.append(String.format("%.2f МБ", f.length() / 1048576.0)).append("\n")
+            else sb.append("нет\n")
+        }
+        sb.append("Движок: ").append(if (ready()) "запущен ($engineInfo, $lang)" else "не запущен").append("\n")
+        sb.append("Последняя ошибка: ").append(if (lastError.isEmpty()) "нет" else lastError).append("\n")
+        sb.append("Оверлей: ").append(if (OverlayService.running) "включён" else "выключен").append("\n")
+        sb.append("Карт в базе: ").append(tiers.length()).append(" классов")
+        return sb.toString()
     }
 }
