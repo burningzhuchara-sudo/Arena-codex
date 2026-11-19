@@ -56,7 +56,7 @@ main{padding:12px 10px 20px;max-width:1180px;margin:0 auto}
 .btn.pri{background:linear-gradient(120deg,var(--vio),var(--mag));border-color:transparent;color:#fff}
 .btn.gold{background:linear-gradient(120deg,var(--gold),var(--or));border-color:transparent;color:#231402}
 .btn.dan{border-color:rgba(239,68,68,.5);color:#FCA5A5}
-.br{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.br .btn{flex:1;min-width:120px}
+.br{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.br .btn{flex:1;min-width:110px}
 .offers{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .off{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--ln);cursor:pointer;background:var(--s1)}
 .off.best{border-color:var(--gold);box-shadow:0 0 0 1px rgba(245,185,66,.4),0 8px 24px rgba(245,185,66,.2)}
@@ -85,6 +85,7 @@ main{padding:12px 10px 20px;max-width:1180px;margin:0 auto}
 .dr .n{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dr .x{width:28px;height:28px;border-radius:8px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.1);color:#FCA5A5;cursor:pointer}
 .mini{font-size:11.5px;color:var(--mut2);line-height:1.55}
+.diag{white-space:pre-wrap;font-family:monospace;font-size:11px;color:#C4B5FD;background:rgba(10,7,19,.55);border:1px solid var(--ln);border-radius:10px;padding:10px;margin-top:10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}.chips span{font-size:11.5px;padding:5px 9px;border-radius:999px;background:var(--s3);border:1px solid var(--ln);color:var(--mut)}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:45;height:calc(var(--tab) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:flex;background:rgba(10,7,19,.98);backdrop-filter:blur(16px);border-top:1px solid var(--ln)}
 nav button{flex:1;background:none;border:0;color:var(--mut2);font-size:10.5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;position:relative}
@@ -138,8 +139,8 @@ var CL=[["death-knight","Рыцарь смерти","DK","#C41F3B"],["demon-hunt
 var CM={};CL.forEach(function(c){CM[c[0]]={n:c[1],a:c[2],c:c[3]}});
 var TI=["S","A","B","C","D","E","F"],TC={S:"#F5B942",A:"#A3E635",B:"#22D3EE",C:"#8B5CF6",D:"#F97316",E:"#EF4444",F:"#9F1239"},TN={S:"Отлично 100+",A:"Хорошо 90–99",B:"Выше среднего 80–89",C:"Средне 70–79",D:"Ниже среднего 60–69",E:"Плохо 40–59",F:"Слабо <40"};
 var NAT=typeof Android!=="undefined";
-var D={tiers:{},meta:{},stamp:"—",live:false,overlay:false,ocr:false,lang:"rus"};
-var S={tab:"tiers",cls:"mage",q:"",tiers:{S:1,A:1,B:1,C:1,D:1,E:1,F:1},sort:"score",cost:"all",imgs:true,deck:[],draft:{phase:"setup",offer:[],packs:[]},status:""};
+var D={tiers:{},meta:{},stamp:"—",live:false,overlay:false,ocr:false,ocrErr:"",ocrEngine:"",lang:"rus"};
+var S={tab:"tiers",cls:"mage",q:"",tiers:{S:1,A:1,B:1,C:1,D:1,E:1,F:1},sort:"score",cost:"all",imgs:true,deck:[],draft:{phase:"setup",offer:[],packs:[]},status:"",diag:""};
 function N(s){return (s||"").toLowerCase().replace(/ё/g,"е").replace(/[^\p{L}\p{N} ]/gu," ").replace(/\s+/g," ").trim()}
 function E(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function M(n){return D.meta[N(n)]||{n:n,c:-1,t:"",r:"",q:"",k:"",s:"",m:[],x:"",id:""}}
@@ -150,7 +151,7 @@ function score(c,n){var k=N(n),a=pool(c),i;for(i=0;i<a.length;i++)if(N(a[i][0])=
 function art(n){var id=M(n).id;return id?"https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/"+id+".png":null}
 function cnt(n){return S.deck.filter(function(x){return N(x)===N(n)}).length}
 function save(){if(NAT){Android.saveDeck(JSON.stringify(S.deck));Android.saveClass(S.cls)}try{localStorage.setItem("ac_deck",JSON.stringify(S.deck));localStorage.setItem("ac_cls",S.cls)}catch(e){}}
-function toast(m,a,f){var w=document.getElementById("toast"),d=document.createElement("div");d.className="ts";d.innerHTML="<span>"+E(m)+"</span>";if(a){var b=document.createElement("button");b.textContent=a;b.onclick=function(){f&&f();d.remove()};d.appendChild(b)}w.appendChild(d);setTimeout(function(){d.remove()},a?6000:2600)}
+function toast(m,a,f){var w=document.getElementById("toast"),d=document.createElement("div");d.className="ts";d.innerHTML="<span>"+E(m)+"</span>";if(a){var b=document.createElement("button");b.textContent=a;b.onclick=function(){f&&f();d.remove()};d.appendChild(b)}w.appendChild(d);setTimeout(function(){d.remove()},a?6000:3200)}
 function add(n,silent){if(S.deck.length>=30){toast("Колода заполнена");return false}var lim=M(n).q==="LEGENDARY"?1:2;if(cnt(n)>=lim){toast(lim===1?"Легендарная — 1 копия":"Максимум 2 копии");return false}S.deck.push(n);save();if(!silent)toast(n+" → колода","Отменить",function(){var i=S.deck.lastIndexOf(n);if(i>=0){S.deck.splice(i,1);save();render()}});render();return true}
 function del(i){var n=S.deck[i];S.deck.splice(i,1);save();toast("Удалено: "+n,"Вернуть",function(){S.deck.splice(i,0,n);save();render()});render()}
 function curve(){var b=[0,0,0,0,0,0,0,0];S.deck.forEach(function(n){var c=cost(n);if(c!==null)b[Math.min(7,c)]++});return b}
@@ -181,9 +182,9 @@ if(S.sort==="cost")a.sort(function(x,y){return (cost(x[0])||0)-(cost(y[0])||0)||
 function tile(p,i){var n=p[0],s=p[1],t=tier(s),c=cost(n);
 return '<div class="tile" data-open="'+E(n)+'" style="animation-delay:'+Math.min(i*12,240)+'ms">'+img(n,S.cls)+'<span class="rb" style="background:'+TC[t]+'">'+t+'</span>'+(c!==null?'<span class="gem">'+c+'</span>':'')+'<span class="scb" style="color:'+TC[t]+'">'+s+'</span><div class="nm">'+E(n)+'</div><button class="plus'+(cnt(n)?" in":"")+'" data-add="'+E(n)+'">'+(cnt(n)?"−":"+")+'</button></div>'}
 function vTiers(){var a=filtered(),h="";
-if(!D.live)h+='<div class="bn"><div><b>Полный пул не загружен</b><br>Нативный загрузчик обойдёт CORS. Нажмите «Загрузить».</div><button id="ld">Загрузить</button></div>';
+if(!D.live)h+='<div class="bn"><div><b>Полный пул не загружен</b><br>Нативный загрузчик обойдёт CORS.</div><button id="ld">Загрузить</button></div>';
 if(S.status)h+='<div class="pan mini">'+E(S.status)+'</div>';
-if(!a.length){h+='<div class="pan mini">Карт нет. Загрузите пул или импортируйте текст во вкладке Оверлей.</div>'}
+if(!a.length){h+='<div class="pan mini">Карт нет. Загрузите пул.</div>'}
 else if(S.sort==="score"){TI.forEach(function(t){var g=a.filter(function(p){return tier(p[1])===t});if(!g.length)return;h+='<div class="th"><span class="tb" style="background:'+TC[t]+'">'+t+'</span><h2>'+TN[t]+'</h2><em>'+g.length+'</em></div><div class="grid">'+g.map(tile).join("")+'</div>'})}
 else h+='<div class="grid">'+a.map(tile).join("")+'</div>';
 V.innerHTML=h;bind()}
@@ -221,24 +222,40 @@ h+='<div class="pan"><h3>Кривая маны</h3><div class="curve">'+cv.map(f
 var two=cv[2]+cv[3],al=[];if(two<5&&S.deck.length>10)al.push(["bad","Мало 2–3-дропов ("+two+")"]);if(two>=5)al.push(["ok","Ранняя кривая в порядке"]);
 if(S.deck.length>=30)al.push(["ok","Колода собрана"]);
 if(al.length)h+='<div class="pan"><h3>Разбор</h3>'+al.map(function(a){return '<div class="al '+a[0]+'"><span>'+(a[0]==="ok"?"✓":"!")+'</span><div>'+a[1]+'</div></div>'}).join("")+'</div>';
-h+='<div class="pan"><h3>Список<span>'+S.deck.length+'</span></h3>'+(S.deck.length?S.deck.map(function(n,i){return [n,i]}).sort(function(a,b){return (cost(a[0])||0)-(cost(b[0])||0)}).map(function(p){var s=score(S.cls,p[0])||0;return '<div class="dr"><span class="g">'+(cost(p[0])===null?"?":cost(p[0]))+'</span><span class="n">'+E(p[0])+'</span><span style="color:'+TC[tier(s)]+';font-size:11px">'+s+'</span><button class="x" data-del="'+p[1]+'">×</button></div>'}).join(""):'<div class="mini">Пусто — добавьте карты или пройдите драфт.</div>')+'</div>';
+h+='<div class="pan"><h3>Список<span>'+S.deck.length+'</span></h3>'+(S.deck.length?S.deck.map(function(n,i){return [n,i]}).sort(function(a,b){return (cost(a[0])||0)-(cost(b[0])||0)}).map(function(p){var s=score(S.cls,p[0])||0;return '<div class="dr"><span class="g">'+(cost(p[0])===null?"?":cost(p[0]))+'</span><span class="n">'+E(p[0])+'</span><span style="color:'+TC[tier(s)]+';font-size:11px">'+s+'</span><button class="x" data-del="'+p[1]+'">×</button></div>'}).join(""):'<div class="mini">Пусто.</div>')+'</div>';
 V.innerHTML=h;
 document.getElementById("ex").onclick=function(){var t=S.deck.map(function(n){return (cost(n)===null?"?":cost(n))+" — "+n}).join("\n");
 if(navigator.clipboard)navigator.clipboard.writeText(t).then(function(){toast("Скопировано")},function(){toast("Не удалось")});else toast("Недоступно")};
 document.getElementById("cl").onclick=function(){var o=S.deck.slice();S.deck=[];save();toast("Очищено","Вернуть",function(){S.deck=o;save();render()});render()};
 V.querySelectorAll("[data-del]").forEach(function(b){b.onclick=function(){del(+b.getAttribute("data-del"))}})}
-function vOverlay(){var h='<div class="pan"><h3>Оверлей поверх игры<span>'+(D.overlay?"включён":"выключен")+'</span></h3>';
-h+='<p class="mini">Приложение захватывает экран (MediaProjection), распознаёт названия трёх карт драфта через OCR и рисует под ними тир, балл и метку «БЕРИ». Работает поверх Hearthstone, не перехватывая управление.</p>';
+function vOverlay(){
+var h='<div class="pan"><h3>Оверлей поверх игры<span id="ovstate">'+(D.overlay?"включён":"выключен")+'</span></h3>';
+h+='<p class="mini">Захват экрана → OCR названий трёх карт → подписи под ними: тир, балл с поправкой на вашу колоду и метка «БЕРИ». Управление игрой не перехватывается.</p>';
 h+='<div class="br"><button class="btn '+(D.overlay?"dan":"pri")+'" id="ovt">'+(D.overlay?"Выключить оверлей":"Включить оверлей")+'</button><button class="btn" id="ovc">Калибровка ⚙</button></div></div>';
-h+='<div class="pan"><h3>OCR<span>'+(D.ocr?"готов":"нет модели")+'</span></h3><p class="mini">Для русских названий нужна модель rus (~1.5 МБ). Если клиент игры английский — скачайте eng.</p><div class="kv"><span>Язык: '+D.lang+'</span><span>rus: '+(NAT&&Android.ocrHas("rus")?"есть":"нет")+'</span><span>eng: '+(NAT&&Android.ocrHas("eng")?"есть":"нет")+'</span></div><div class="br"><button class="btn" id="dru">Скачать rus</button><button class="btn" id="den">Скачать eng</button></div></div>';
-h+='<div class="pan"><h3>Как настроить</h3><p class="mini">1. Включите оверлей и разрешите показ поверх приложений и захват экрана.<br>2. Откройте Hearthstone, начните драфт.<br>3. На плавающей панели нажмите ⚙ и ползунками совместите голубые рамки с названиями трёх карт.<br>4. Нажмите ⚡ — подписи появятся под картами. Авто-анализ обновляет их сам.<br>5. Колода из вкладки «Драфт» учитывается в рекомендациях.</p></div>';
-h+='<div class="pan"><h3>Ручной импорт пула</h3><p class="mini">Если сайт недоступен: откройте heartharena.com/ru/tierlist в браузере, сохраните страницу и вставьте её HTML сюда.</p><textarea id="imp" placeholder="&lt;html&gt;…"></textarea><div class="br"><button class="btn pri" id="impg">Импортировать</button></div></div>';
+h+='<div class="pan"><h3>OCR<span id="ocrstate">'+(D.ocr?("готов · "+D.ocrEngine):"не запущен")+'</span></h3>';
+h+='<div class="kv"><span>Язык: '+D.lang+'</span><span>rus: '+(NAT&&Android.ocrHas("rus")?"есть":"нет")+'</span><span>eng: '+(NAT&&Android.ocrHas("eng")?"есть":"нет")+'</span></div>';
+if(D.ocrErr)h+='<div class="al bad"><span>!</span><div>'+E(D.ocrErr)+'</div></div>';
+h+='<p class="mini">Если движок не принимает модель — скачайте <b>legacy</b>-версию: она совместима со старым API Tesseract, который используется в сборке.</p>';
+h+='<div class="br"><button class="btn gold" id="dleg">rus legacy</button><button class="btn" id="dstd">rus std</button><button class="btn" id="dfast">rus fast</button></div>';
+h+='<div class="br"><button class="btn" id="den">eng legacy</button><button class="btn pri" id="otest">Проверить OCR</button><button class="btn" id="odiag">Диагностика</button></div>';
+h+='<div class="diag" id="diagbox">'+E(S.diag||"Нажмите «Диагностика»")+'</div></div>';
+h+='<div class="pan"><h3>Как настроить</h3><p class="mini">1. Скачайте модель и нажмите «Проверить OCR» — должно быть «готов».<br>2. Включите оверлей, разрешите показ поверх приложений и захват экрана.<br>3. Откройте Hearthstone, начните драфт.<br>4. На плавающей панели ⚙ → ползунками совместите голубые рамки с названиями трёх карт → «Готово».<br>5. ⚡ — анализ. Авто-анализ обновляет подписи сам.</p></div>';
+h+='<div class="pan"><h3>Ручной импорт пула</h3><textarea id="imp" placeholder="HTML страницы heartharena.com/ru/tierlist"></textarea><div class="br"><button class="btn pri" id="impg">Импортировать</button></div></div>';
 V.innerHTML=h;
-document.getElementById("ovt").onclick=function(){if(!NAT)return toast("Только в APK");D.overlay?Android.stopOverlay():Android.startOverlay();setTimeout(function(){D.overlay=NAT&&Android.overlayRunning();render()},1200)};
+document.getElementById("ovt").onclick=function(){if(!NAT)return toast("Только в APK");D.overlay?Android.stopOverlay():Android.startOverlay();setTimeout(poll,1500)};
 document.getElementById("ovc").onclick=function(){NAT?Android.calibrate():toast("Только в APK")};
-document.getElementById("dru").onclick=function(){NAT?Android.downloadOcr("rus"):toast("Только в APK")};
-document.getElementById("den").onclick=function(){NAT?Android.downloadOcr("eng"):toast("Только в APK")};
+document.getElementById("dleg").onclick=function(){NAT?Android.downloadOcr2("rus","legacy"):toast("Только в APK")};
+document.getElementById("dstd").onclick=function(){NAT?Android.downloadOcr2("rus","std"):toast("Только в APK")};
+document.getElementById("dfast").onclick=function(){NAT?Android.downloadOcr2("rus","fast"):toast("Только в APK")};
+document.getElementById("den").onclick=function(){NAT?Android.downloadOcr2("eng","legacy"):toast("Только в APK")};
+document.getElementById("otest").onclick=function(){NAT?Android.ocrTest():toast("Только в APK")};
+document.getElementById("odiag").onclick=function(){if(NAT){S.diag=Android.ocrDiag();document.getElementById("diagbox").textContent=S.diag}};
 document.getElementById("impg").onclick=function(){NAT?Android.importData(document.getElementById("imp").value):toast("Только в APK")}}
+function poll(){if(!NAT)return;try{var p=JSON.parse(Android.payload());D.overlay=p.overlay;D.ocr=p.ocr;D.ocrErr=p.ocrErr;D.ocrEngine=p.ocrEngine;D.lang=p.lang;
+var a=document.getElementById("ovstate");if(a)a.textContent=D.overlay?"включён":"выключен";
+var b=document.getElementById("ocrstate");if(b)b.textContent=D.ocr?("готов · "+D.ocrEngine):"не запущен";
+document.getElementById("dot").className="dot"+(D.live?" on":"");
+document.getElementById("ov").className="ib"+(D.overlay?" on":"")}catch(e){}}
 function sheet(n){var m=M(n),s=score(S.cls,n)||0,t=tier(s),a=art(n),ad=advise(n);
 var h='<h3>'+E(n)+'</h3><div class="kv"><span style="color:'+TC[t]+'">'+t+' · '+s+'</span>'+(cost(n)!==null?'<span>'+cost(n)+' маны</span>':'')+(m.t?'<span>'+m.t+'</span>':'')+(m.r?'<span>'+m.r+'</span>':'')+(m.q?'<span>'+m.q+'</span>':'')+'</div>';
 if(S.imgs&&a)h+='<img src="'+a+'" style="width:150px;border-radius:12px;border:1px solid var(--ln2);display:block;margin:8px 0">';
@@ -252,7 +269,7 @@ function manual(start){var p=pool(S.cls).concat(pool("any").filter(function(x){r
 var h='<h3>Ручной набор <span style="color:var(--gold)" id="mc">'+S.deck.length+'/30</span></h3><label class="search" style="margin-bottom:9px"><span style="color:var(--mut2)">⌕</span><input id="mq" placeholder="Поиск…"></label><div id="ml" style="max-height:46vh;overflow:auto"></div><div class="br"><button class="btn gold" id="ms">'+(start?"Начать драфт":"Готово")+'</button><button class="btn" id="mx">Закрыть</button></div>';
 SH.innerHTML=h;SW.classList.add("open");
 function draw(q){var l=p.filter(function(x){return !q||N(x[0]).indexOf(q)>=0}).sort(function(a,b){return b[1]-a[1]}).slice(0,80);
-document.getElementById("ml").innerHTML=l.map(function(x){var c=cost(x[0]);return '<div class="mr"><span class="g" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:radial-gradient(circle at 35% 30%,#7DD3FC,#1D4ED8);color:#fff">'+(c===null?"?":c)+'</span><span class="n">'+E(x[0])+'</span><span style="color:'+TC[tier(x[1])]+';font-size:11px;font-weight:800">'+x[1]+'</span><button data-m="'+E(x[0])+'">'+(cnt(x[0])?"−":"+")+'</button></div>'}).join("");
+document.getElementById("ml").innerHTML=l.map(function(x){var c=cost(x[0]);return '<div class="mr"><span style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:radial-gradient(circle at 35% 30%,#7DD3FC,#1D4ED8);color:#fff">'+(c===null?"?":c)+'</span><span class="n">'+E(x[0])+'</span><span style="color:'+TC[tier(x[1])]+';font-size:11px;font-weight:800">'+x[1]+'</span><button data-m="'+E(x[0])+'">'+(cnt(x[0])?"−":"+")+'</button></div>'}).join("");
 document.querySelectorAll("[data-m]").forEach(function(b){b.onclick=function(){var n=b.getAttribute("data-m");cnt(n)?del(S.deck.lastIndexOf(n)):add(n,true);draw(N(document.getElementById("mq").value));document.getElementById("mc").textContent=S.deck.length+"/30"}})}
 draw("");document.getElementById("mq").oninput=function(e){draw(N(e.target.value))};
 document.getElementById("mx").onclick=close;
@@ -270,7 +287,8 @@ function buildCls(){var w=document.getElementById("cls");w.innerHTML="";CL.forEa
 window.AC={setData:function(o){try{D=Object.assign(D,typeof o==="string"?JSON.parse(o):o)}catch(e){}render()},
 setDeck:function(a){try{S.deck=typeof a==="string"?JSON.parse(a):a}catch(e){}render()},
 setClass:function(c){if(CM[c]){S.cls=c;buildCls();render()}},
-setStatus:function(s){S.status=s;toast(s);render()},
+setStatus:function(s){S.status=s;toast(s);if(S.tab==="overlay")poll();else render()},
+showDiag:function(t){S.diag=t;var d=document.getElementById("diagbox");if(d)d.textContent=t},
 nativeUpdate:function(k,v){if(k==="overlay"){D.overlay=v==="true";render()}}};
 function init(){try{var d=localStorage.getItem("ac_deck");if(d)S.deck=JSON.parse(d);var c=localStorage.getItem("ac_cls");if(c&&CM[c])S.cls=c}catch(e){}
 buildCls();
@@ -285,6 +303,7 @@ document.getElementById("rf").onclick=function(){NAT?Android.refresh():toast("Т
 document.getElementById("ov").onclick=function(){S.tab="overlay";render()};
 document.querySelectorAll("#tabs button").forEach(function(b){b.onclick=function(){S.tab=b.getAttribute("data-tab");render();window.scrollTo({top:0,behavior:"smooth"})}});
 document.getElementById("scr").onclick=close;
+setInterval(function(){if(S.tab==="overlay")poll()},1500);
 render();
 if(NAT){try{AC.setData(Android.payload());AC.setDeck(Android.deck());AC.setClass(Android.cls());if(!D.live)Android.refresh()}catch(e){}}}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();
