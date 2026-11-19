@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.ArenaCodex" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0A0713</item>
+        <item name="android:navigationBarColor">#0A0713</item>
+        <item name="android:windowBackground">#0A0713</item>
+        <item name="colorPrimary">#8B5CF6</item>
+        <item name="colorSecondary">#F5B942</item>
+    </style>
+</resources>
