@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Арена Кодекс</string>
+    <string name="notif_title">Арена Кодекс · оверлей драфта</string>
+    <string name="notif_text">Анализ экрана включён</string>
+</resources>
