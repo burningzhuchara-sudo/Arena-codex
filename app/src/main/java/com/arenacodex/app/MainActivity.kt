@@ -27,7 +27,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
             if (r.resultCode == Activity.RESULT_OK && r.data != null) {
                 OverlayService.start(this, r.resultCode, r.data!!)
-                push("overlay", "true")
+                pushAll()
                 toast("Оверлей включён — переключитесь на Hearthstone")
             } else toast("Захват экрана не разрешён")
             pendingProjection = false
@@ -77,26 +77,22 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(Bridge(), "Android")
         web.loadUrl("https://appassets.androidplatform.net/assets/index.html")
 
-        if (Store.tiers.length() == 0) scope.launch { silentRefresh() }
+        scope.launch {
+            if (Store.tiers.length() == 0) { try { Store.refresh() } catch (_: Exception) {} }
+            val lang = Store.prefs.getString("ocr_lang", "rus") ?: "rus"
+            withContext(Dispatchers.IO) { Ocr.init(this@MainActivity, lang) }
+            pushAll()
+        }
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-
     private fun js(code: String) = web.post { web.evaluateJavascript(code, null) }
-
-    private fun push(key: String, value: String) =
-        js("window.AC && AC.nativeUpdate('$key', ${JSONObjectQuote(value)});")
-
-    private fun JSONObjectQuote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-
+    private fun q(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    private fun push(k: String, v: String) = js("window.AC && AC.nativeUpdate('$k', ${q(v)});")
     private fun pushAll() {
         js("window.AC && AC.setData(${Store.payload()});")
         js("window.AC && AC.setDeck(${Store.prefs.getString("deck", "[]")});")
         js("window.AC && AC.setClass('${Store.prefs.getString("cls", "mage")}');")
-    }
-
-    private suspend fun silentRefresh() {
-        try { Store.refresh(); pushAll() } catch (_: Exception) {}
     }
 
     private fun requestProjection() {
@@ -113,43 +109,53 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun overlayRunning(): Boolean = OverlayService.running
         @JavascriptInterface fun ocrReady(): Boolean = Ocr.ready()
         @JavascriptInterface fun ocrHas(l: String): Boolean = Ocr.has(this@MainActivity, l)
+        @JavascriptInterface fun ocrDiag(): String = Ocr.diag(this@MainActivity)
 
-        @JavascriptInterface fun saveDeck(json: String) {
-            Store.prefs.edit().putString("deck", json).apply()
-        }
-        @JavascriptInterface fun saveClass(c: String) {
-            Store.prefs.edit().putString("cls", c).apply()
-        }
-        @JavascriptInterface fun setPref(k: String, v: String) {
-            Store.prefs.edit().putString(k, v).apply()
+        @JavascriptInterface fun saveDeck(json: String) { Store.prefs.edit().putString("deck", json).apply() }
+        @JavascriptInterface fun saveClass(c: String) { Store.prefs.edit().putString("cls", c).apply() }
+        @JavascriptInterface fun setPref(k: String, v: String) { Store.prefs.edit().putString(k, v).apply() }
+
+        @JavascriptInterface fun ocrTest() {
+            scope.launch {
+                val lang = Store.prefs.getString("ocr_lang", "rus") ?: "rus"
+                js("window.AC && AC.setStatus('Проверка OCR ($lang)…');")
+                val ok = withContext(Dispatchers.IO) { Ocr.init(this@MainActivity, lang) }
+                pushAll()
+                js("window.AC && AC.setStatus(${q(if (ok) "OCR запущен: " + Ocr.engineInfo else "OCR не запустился: " + Ocr.lastError)});")
+                js("window.AC && AC.showDiag(${q(Ocr.diag(this@MainActivity))});")
+            }
         }
 
         @JavascriptInterface fun refresh() {
             scope.launch {
                 js("window.AC && AC.setStatus('Загрузка полного пула…');")
                 try {
-                    val n = Store.refresh()
-                    pushAll()
+                    val n = Store.refresh(); pushAll()
                     js("window.AC && AC.setStatus('Загружено $n оценок');")
                 } catch (e: Exception) {
-                    js("window.AC && AC.setStatus('Ошибка загрузки: ${e.message?.replace("'", "") ?: ""}');")
+                    js("window.AC && AC.setStatus(${q("Ошибка загрузки: " + (e.message ?: ""))});")
                 }
             }
         }
 
-        @JavascriptInterface fun downloadOcr(lang: String) {
+        @JavascriptInterface fun downloadOcr(lang: String) = downloadOcr2(lang, "std")
+
+        @JavascriptInterface fun downloadOcr2(lang: String, source: String) {
             scope.launch {
-                js("window.AC && AC.setStatus('Скачивание OCR-модели $lang…');")
+                js("window.AC && AC.setStatus('Скачивание $lang ($source)…');")
                 try {
-                    Ocr.download(this@MainActivity, lang) { pct ->
-                        js("window.AC && AC.setStatus('OCR $lang: $pct%');")
+                    withContext(Dispatchers.IO) {
+                        Ocr.download(this@MainActivity, lang, source) { pct ->
+                            js("window.AC && AC.setStatus('$lang ($source): $pct%');")
+                        }
                     }
-                    Ocr.init(this@MainActivity, lang)
                     Store.prefs.edit().putString("ocr_lang", lang).apply()
-                    js("window.AC && AC.setStatus('OCR $lang готов');")
+                    val ok = withContext(Dispatchers.IO) { Ocr.init(this@MainActivity, lang) }
                     pushAll()
+                    js("window.AC && AC.setStatus(${q(if (ok) "Модель $lang установлена, OCR запущен" else "Модель скачана, но движок её не принял: " + Ocr.lastError)});")
+                    js("window.AC && AC.showDiag(${q(Ocr.diag(this@MainActivity))});")
                 } catch (e: Exception) {
-                    js("window.AC && AC.setStatus('Не удалось скачать OCR: ${e.message?.replace("'", "") ?: ""}');")
+                    js("window.AC && AC.setStatus(${q("Не удалось скачать: " + (e.message ?: ""))});")
                 }
             }
         }
@@ -158,24 +164,20 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (!Settings.canDrawOverlays(this@MainActivity)) {
                     overlayPermLauncher.launch(
-                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:$packageName"))
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
                     )
                 } else requestProjection()
             }
         }
 
         @JavascriptInterface fun stopOverlay() {
-            runOnUiThread { OverlayService.stop(this@MainActivity); push("overlay", "false") }
+            runOnUiThread { OverlayService.stop(this@MainActivity); pushAll() }
         }
 
         @JavascriptInterface fun calibrate() {
             runOnUiThread {
-                if (!OverlayService.running) { toast("Сначала включите оверлей"); return@runOnUiThread }
-                val i = Intent(this@MainActivity, OverlayService::class.java)
-                i.action = "calib"
-                // панель открывается кнопкой ⚙ на плавающей панели поверх игры
-                toast("Нажмите ⚙ на плавающей панели поверх игры")
+                if (!OverlayService.running) toast("Сначала включите оверлей")
+                else toast("Нажмите ⚙ на плавающей панели поверх игры")
             }
         }
 
@@ -197,8 +199,7 @@ class MainActivity : AppCompatActivity() {
                         if (arr.length() > 0) out.put(id, arr)
                     }
                     if (count > 200) {
-                        Store.tiers = out; Store.live = true; Store.stamp = "импорт"
-                        Store.saveCache()
+                        Store.tiers = out; Store.live = true; Store.stamp = "импорт"; Store.saveCache()
                         withContext(Dispatchers.Main) { pushAll() }
                         js("window.AC && AC.setStatus('Импортировано $count оценок');")
                     } else js("window.AC && AC.setStatus('В тексте не найдено карт');")
@@ -209,10 +210,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        if (web.canGoBack()) web.goBack() else super.onBackPressed()
-    }
-
+    override fun onBackPressed() { if (web.canGoBack()) web.goBack() else super.onBackPressed() }
     override fun onResume() { super.onResume(); pushAll() }
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 }
