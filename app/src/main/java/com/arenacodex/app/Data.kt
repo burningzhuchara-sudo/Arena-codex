@@ -2,6 +2,7 @@ package com.arenacodex.app
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -10,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.io.File
+import java.lang.reflect.Method
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.min
@@ -30,11 +32,6 @@ object Store {
     var meta: JSONObject = JSONObject()
     var stamp: String = "встроенный срез"
     var live: Boolean = false
-
-    val classKeys = listOf(
-        "death-knight", "demon-hunter", "druid", "hunter", "mage", "paladin",
-        "priest", "rogue", "shaman", "warlock", "warrior", "any"
-    )
 
     fun norm(s: String): String =
         s.lowercase().replace('ё', 'е').replace(Regex("[^\\p{L}\\p{N} ]"), " ")
@@ -84,7 +81,6 @@ object Store {
         }
     }
 
-    /** Полный пул: нативный HTTP — CORS не существует. */
     suspend fun refresh(): Int = withContext(Dispatchers.IO) {
         val html = get("https://heartharena.com/ru/tierlist")
         val doc = Jsoup.parse(html)
@@ -164,7 +160,6 @@ object Store {
         s >= 60 -> "D"; s >= 40 -> "E"; else -> "F"
     }
 
-    /** Нечёткое сопоставление OCR-текста с реальным названием карты. */
     fun match(raw: String, cls: String): Pair<String, Int>? {
         val q = norm(raw)
         if (q.length < 3) return null
@@ -203,7 +198,6 @@ object Store {
         return 1.0 - prev[n].toDouble() / max(m, n)
     }
 
-    /** Поправки как в HearthArena: кривая, ответы, пакеты. */
     fun advise(name: String, cls: String, deck: List<String>): Triple<Int, Int, String> {
         val base = score(cls, name) ?: 60
         var bonus = 0; val why = ArrayList<String>()
@@ -223,7 +217,7 @@ object Store {
         }
         if (text.contains("уничтожает")) { bonus += 5; why.add("ремувал") }
         if (text.contains("берете") || text.contains("добирает")) { bonus += 4; why.add("добор") }
-        if (taunt) { bonus += 2 }
+        if (taunt) bonus += 2
         if (dr && deck.count { d ->
                 val mm = meta.optJSONObject(norm(d))?.optJSONArray("m") ?: JSONArray()
                 (0 until mm.length()).any { mm.getString(it) == "DEATHRATTLE" }
@@ -247,14 +241,23 @@ object Store {
     }
 }
 
+/**
+ * OCR-слой через reflection: работает и с tess-two, и с Tesseract4Android,
+ * независимо от того, как называется метод освобождения (end/recycle) и геттер текста.
+ */
 object Ocr {
-    private var api: com.googlecode.tesseract.android.TessBaseAPI? = null
+    private var api: Any? = null
     private var lang: String = ""
+    private var mImage: Method? = null
+    private var mText: Method? = null
+    private var mEnd: Method? = null
 
     fun dir(ctx: Context): File {
         val d = File(ctx.filesDir, "tessdata"); if (!d.exists()) d.mkdirs(); return d
     }
+
     fun has(ctx: Context, l: String) = File(dir(ctx), "$l.traineddata").exists()
+
     fun ready() = api != null
 
     suspend fun download(ctx: Context, l: String, onProgress: (Int) -> Unit) =
@@ -263,11 +266,11 @@ object Ocr {
             val req = Request.Builder().url(url).build()
             Store.http.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) throw IllegalStateException("HTTP " + r.code)
-                val body = r.body ?: throw IllegalStateException("empty")
+                val body = r.body ?: throw IllegalStateException("empty body")
                 val total = body.contentLength()
-                val out = File(dir(ctx), "$l.traineddata.tmp")
+                val tmp = File(dir(ctx), "$l.traineddata.tmp")
                 body.byteStream().use { input ->
-                    out.outputStream().use { os ->
+                    tmp.outputStream().use { os ->
                         val buf = ByteArray(64 * 1024); var read = 0L; var n: Int
                         while (input.read(buf).also { n = it } > 0) {
                             os.write(buf, 0, n); read += n
@@ -275,35 +278,77 @@ object Ocr {
                         }
                     }
                 }
-                out.renameTo(File(dir(ctx), "$l.traineddata"))
+                tmp.renameTo(File(dir(ctx), "$l.traineddata"))
             }
-            api?.recycle(); api = null; lang = ""
+            release()
         }
 
     fun init(ctx: Context, l: String): Boolean {
         if (api != null && lang == l) return true
         if (!has(ctx, l)) return false
         return try {
-            api?.recycle()
-            val a = com.googlecode.tesseract.android.TessBaseAPI()
-            val ok = a.init(ctx.filesDir.absolutePath, l)
-            if (!ok) { a.recycle(); api = null; false }
-            else {
-                a.setPageSegMode(com.googlecode.tesseract.android.TessBaseAPI.PageSegMode.PSM_SINGLE_LINE)
-                api = a; lang = l; true
+            release()
+            val cls = Class.forName("com.googlecode.tesseract.android.TessBaseAPI")
+            val a = cls.getDeclaredConstructor().newInstance()
+
+            val init = cls.getMethod("init", String::class.java, String::class.java)
+            val ok = (init.invoke(a, ctx.filesDir.absolutePath, l) as? Boolean) ?: false
+            if (!ok) {
+                safeEnd(cls, a)
+                false
+            } else {
+                mImage = cls.methods.firstOrNull {
+                    it.name == "setImage" && it.parameterCount == 1 &&
+                        it.parameterTypes[0] == Bitmap::class.java
+                }
+                mText = cls.methods.firstOrNull {
+                    (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0
+                }
+                mEnd = cls.methods.firstOrNull {
+                    (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
+                }
+                val psm = cls.methods.firstOrNull {
+                    it.name == "setPageSegMode" && it.parameterCount == 1 &&
+                        it.parameterTypes[0] == Int::class.javaPrimitiveType
+                }
+                try { psm?.invoke(a, 7) } catch (_: Throwable) {}
+
+                if (mImage == null || mText == null) {
+                    safeEnd(cls, a)
+                    false
+                } else {
+                    api = a; lang = l; true
+                }
             }
-        } catch (_: Throwable) { api = null; false }
+        } catch (_: Throwable) {
+            api = null; lang = ""; false
+        }
     }
 
-    fun read(bmp: android.graphics.Bitmap): String {
+    private fun safeEnd(cls: Class<*>, a: Any) {
+        try {
+            val m = cls.methods.firstOrNull {
+                (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
+            }
+            m?.invoke(a)
+        } catch (_: Throwable) {}
+    }
+
+    fun read(bmp: Bitmap): String {
         val a = api ?: return ""
+        val img = mImage ?: return ""
+        val txt = mText ?: return ""
         return try {
             synchronized(a) {
-                a.setImage(bmp)
-                (a.utF8Text ?: "").trim()
+                img.invoke(a, bmp)
+                (txt.invoke(a) as? String ?: "").trim()
             }
         } catch (_: Throwable) { "" }
     }
 
-    fun release() { try { api?.recycle() } catch (_: Throwable) {}; api = null; lang = "" }
+    fun release() {
+        val a = api
+        if (a != null) { try { mEnd?.invoke(a) } catch (_: Throwable) {} }
+        api = null; lang = ""; mImage = null; mText = null; mEnd = null
+    }
 }
