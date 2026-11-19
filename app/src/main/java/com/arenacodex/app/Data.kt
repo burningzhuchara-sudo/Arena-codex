@@ -432,7 +432,7 @@ object Ocr {
         sb.append("Движок: ").append(if (ready()) "запущен ($engineInfo, $lang)" else "не запущен").append("\n")
         sb.append("Последняя ошибка: ").append(if (lastError.isEmpty()) "нет" else lastError).append("\n")
         sb.append("Оверлей: ").append(if (OverlayService.running) "включён" else "выключен").append("\n")
-        sb.append("Карт в базе: ").append(tiers.length()).append(" классов")
+        sb.append("Карт в базе: ").append(Store.tiers.length()).append(" классов")
         return sb.toString()
     }
 }
