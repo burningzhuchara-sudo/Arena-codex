@@ -87,27 +87,31 @@ class OverlayService : Service() {
         val rc = i?.getIntExtra("rc", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
         val data: Intent? = i?.getParcelableExtra("data")
         if (rc != Activity.RESULT_OK || data == null) { stopSelf(); return START_NOT_STICKY }
-
-        val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = mgr.getMediaProjection(rc, data)
-        projection.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() { shutdown() }
-        }, handler)
-
-        val scale = 1280f / max(sw, sh)
-        val cw = (sw * minOf(1f, scale)).roundToInt()
-        val chh = (sh * minOf(1f, scale)).roundToInt()
-        reader = ImageReader.newInstance(cw, chh, PixelFormat.RGBA_8888, 2)
-        display = projection.createVirtualDisplay(
-            "ac", cw, chh, dpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            reader!!.surface, null, handler
-        )
-
-        addLabels(); addTrigger()
-        running = true
-        Ocr.init(this, p.getString("ocr_lang", "rus") ?: "rus")
-        handler.postDelayed(tick, 900)
+        try {
+            val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            projection = mgr.getMediaProjection(rc, data)
+            projection.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() { shutdown() }
+            }, handler)
+            val scale = 1280f / max(sw, sh)
+            val cw = (sw * minOf(1f, scale)).roundToInt()
+            val chh = (sh * minOf(1f, scale)).roundToInt()
+            reader = ImageReader.newInstance(cw, chh, PixelFormat.RGBA_8888, 2)
+            display = projection.createVirtualDisplay(
+                "ac", cw, chh, dpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                reader!!.surface, null, handler
+            )
+            addLabels(); addTrigger()
+            running = true
+            handler.postDelayed(tick, 900)
+        } catch (t: Throwable) {
+            running = false
+            try { display?.release() } catch (_: Throwable) {}
+            try { reader?.close() } catch (_: Throwable) {}
+            try { projection.stop() } catch (_: Throwable) {}
+            stopSelf()
+        }
         return START_STICKY
     }
 
@@ -172,7 +176,7 @@ class OverlayService : Service() {
             text = t; setTextColor(Color.parseColor("#EDE3D2")); textSize = 15f
             setPadding(0, 6, 0, 12); setTypeface(typeface, Typeface.BOLD)
         }
-        root.addView(title("Калибровка оверлея · двигайте ползунки поверх игры"))
+        root.addView(title("Калибровка · ползунки поверх игры"))
 
         fun slider(label: String, key: String, def: Float, min: Float, max: Float, scale: Float = 100f) {
             val row = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -214,14 +218,14 @@ class OverlayService : Service() {
             setOnCheckedChangeListener { _, v -> p.edit().putBoolean("show_name", v).apply(); labels.invalidate() }
         }
         val guides = Switch(ctx).apply {
-            text = "Показать рамки калибровки"; setTextColor(Color.parseColor("#EDE3D2"))
+            text = "Рамки калибровки"; setTextColor(Color.parseColor("#EDE3D2"))
             isChecked = true
             setOnCheckedChangeListener { _, v -> labels.calib = v; labels.invalidate() }
         }
         root.addView(auto); root.addView(showName); root.addView(guides)
 
         val spin = Spinner(ctx)
-        val langs = listOf("rus", "eng", "rus+eng")
+        val langs = listOf("rus", "eng")
         spin.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, langs)
         spin.setSelection(langs.indexOf(p.getString("ocr_lang", "rus")).coerceAtLeast(0))
         spin.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -267,7 +271,7 @@ class OverlayService : Service() {
             var img: Image? = null
             var bmp: Bitmap? = null
             try {
-                if (!Store.prefs.getBoolean("ocr_ok", false)) {
+                if (!p.getBoolean("ocr_ok", false)) {
                     handler.post {
                         labels.status = "OCR не проверен: в приложении нажмите «Проверить OCR»"
                         labels.invalidate()
@@ -316,6 +320,7 @@ class OverlayService : Service() {
             }
         }
     }
+
     private fun rects(w: Int, h: Int): List<Rect> {
         val x = f("row_x", .10f) * w
         val y = f("row_y", .44f) * h
