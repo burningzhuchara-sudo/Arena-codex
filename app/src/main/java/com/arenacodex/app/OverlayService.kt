@@ -19,7 +19,6 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 class OverlayService : Service() {
 
@@ -56,7 +55,7 @@ class OverlayService : Service() {
         override fun run() {
             if (!running) return
             if (p.getBoolean("auto", true)) analyze()
-            handler.postDelayed(this, f("interval", 1400f).toLong())
+            handler.postDelayed(this, f("interval", 1600f).toLong())
         }
     }
 
@@ -94,12 +93,10 @@ class OverlayService : Service() {
             projection.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() { shutdown() }
             }, handler)
-            val scale = 1280f / max(sw, sh)
-            val cw = (sw * minOf(1f, scale)).roundToInt()
-            val chh = (sh * minOf(1f, scale)).roundToInt()
-            reader = ImageReader.newInstance(cw, chh, PixelFormat.RGBA_8888, 2)
+            // Захват в РОДНОМ разрешении — не теряем детали текста
+            reader = ImageReader.newInstance(sw, sh, PixelFormat.RGBA_8888, 2)
             display = projection.createVirtualDisplay(
-                "ac", cw, chh, dpi,
+                "ac", sw, sh, dpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 reader!!.surface, null, handler
             )
@@ -122,9 +119,7 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         if (!touchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         return WindowManager.LayoutParams(
-            w, h,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            flags, PixelFormat.TRANSLUCENT
+            w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT
         ).apply { this.gravity = gravity }
     }
 
@@ -161,7 +156,6 @@ class OverlayService : Service() {
         lp.y = 120
         trigger = bar
         wm.addView(bar, lp)
-
         var dx = 0; var dy = 0; var sx = 0f; var sy = 0f
         bar.setOnTouchListener { v, e ->
             when (e.action) {
@@ -187,11 +181,10 @@ class OverlayService : Service() {
             setPadding(26, 18, 26, 22)
         }
         root.addView(TextView(ctx).apply {
-            text = "Калибровка: тяните рамку пальцем, размер — ползунками"
+            text = "Цельтесь рамками в ТЕКСТ карт (описание), не в имена"
             setTextColor(Color.parseColor("#EDE3D2")); textSize = 14f
             setPadding(0, 4, 0, 10); setTypeface(typeface, Typeface.BOLD)
         })
-
         fun slider(label: String, key: String, def: Float, min: Float, max: Float, scale: Float = 100f) {
             val row = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
             val cap = TextView(ctx).apply { setTextColor(Color.parseColor("#A79BC4")); textSize = 12f }
@@ -210,17 +203,17 @@ class OverlayService : Service() {
             })
             row.addView(cap); row.addView(sb); root.addView(row)
         }
-
-        slider("Высота области имён", "row_h", 0.06f, 0.01f, 0.4f)
+        slider("Верх рамки (Y)", "row_y", 0.55f, 0f, 1f)
+        slider("Высота рамки", "row_h", 0.16f, 0.02f, 0.5f)
         slider("Ширина ряда", "row_w", 0.62f, 0.1f, 1f)
         slider("Зазор между картами", "gap", 0.02f, 0f, 0.2f)
-        slider("Отступ подписи вниз", "label_dy", 0.03f, 0f, 0.5f)
+        slider("Отступ подписи вниз", "label_dy", 0.04f, 0f, 0.5f)
         slider("Размер шрифта", "font", 13f, 8f, 28f, 1f)
         slider("Прозрачность фона", "alpha", 0.88f, 0.2f, 1f)
-        slider("Интервал анализа, мс", "interval", 1400f, 400f, 5000f, 1f)
+        slider("Интервал анализа, мс", "interval", 1600f, 400f, 5000f, 1f)
 
         val guides = Switch(ctx).apply {
-            text = "Рамки калибровки + перетаскивание пальцем"; setTextColor(Color.parseColor("#EDE3D2"))
+            text = "Рамки + перетаскивание пальцем"; setTextColor(Color.parseColor("#EDE3D2"))
             isChecked = true
             setOnCheckedChangeListener { _, v -> labels.calib = v; setCalibTouchable(v); labels.invalidate() }
         }
@@ -245,8 +238,8 @@ class OverlayService : Service() {
         }
         row.addView(action("Анализ", "#F5B942") { analyze() })
         row.addView(action("Сброс", "#22D3EE") {
-            listOf("row_y" to .46f, "row_h" to .06f, "row_x" to .20f, "row_w" to .62f,
-                "gap" to .02f, "label_dy" to .03f, "font" to 13f, "alpha" to .88f, "interval" to 1400f)
+            listOf("row_y" to .55f, "row_h" to .16f, "row_x" to .20f, "row_w" to .62f,
+                "gap" to .02f, "label_dy" to .04f, "font" to 13f, "alpha" to .88f, "interval" to 1600f)
                 .forEach { setF(it.first, it.second) }
             labels.invalidate()
         })
@@ -262,11 +255,10 @@ class OverlayService : Service() {
         labels.invalidate()
     }
 
-    /** Ч/б с НИЗКИМ порогом: тёмный текст → чёрный, всё остальное (рамка, бирюза) → белое. */
     private fun binarize(src: Bitmap, factor: Float): Bitmap {
-        val trim = (src.width * 0.06).toInt()
+        val trim = (src.width * 0.05).toInt()
         val cropped = if (trim * 2 < src.width) Bitmap.createBitmap(src, trim, 0, src.width - trim * 2, src.height) else src
-        val big = Bitmap.createScaledBitmap(cropped, cropped.width * 4, cropped.height * 4, true)
+        val big = Bitmap.createScaledBitmap(cropped, cropped.width * 2, cropped.height * 2, true)
         val out = big.copy(Bitmap.Config.ARGB_8888, true)
         val n = out.width * out.height
         val px = IntArray(n)
@@ -297,10 +289,7 @@ class OverlayService : Service() {
             var bmp: Bitmap? = null
             try {
                 if (!p.getBoolean("ocr_ok", false)) {
-                    handler.post {
-                        labels.status = "OCR не проверен: в приложении нажмите «Проверить OCR»"
-                        labels.invalidate()
-                    }
+                    handler.post { labels.status = "OCR не проверен: нажмите «Проверить OCR»"; labels.invalidate() }
                     busy = false; return@execute
                 }
                 img = r.acquireLatestImage()
@@ -308,10 +297,7 @@ class OverlayService : Service() {
                 bmp = toBitmap(img)
                 val lang = p.getString("ocr_lang", "rus") ?: "rus"
                 if (!Ocr.init(this, lang)) {
-                    handler.post {
-                        labels.status = if (Ocr.lastError.isEmpty()) "OCR не готов" else Ocr.lastError
-                        labels.invalidate()
-                    }
+                    handler.post { labels.status = if (Ocr.lastError.isEmpty()) "OCR не готов" else Ocr.lastError; labels.invalidate() }
                     busy = false; return@execute
                 }
                 val cls = p.getString("cls", "mage") ?: "mage"
@@ -326,7 +312,7 @@ class OverlayService : Service() {
                     for (v in vs) {
                         val t = Ocr.read(v)
                         if (raw.isEmpty()) raw = t
-                        val m = Store.match(t, cls)
+                        val m = Store.matchByText(t, cls) ?: Store.match(t, cls)
                         if (m != null) { raw = t; hit = m; break }
                     }
                     vs.forEach { it.recycle() }
@@ -337,12 +323,8 @@ class OverlayService : Service() {
                         res.add(Slot(hit.first, raw, a.second, a.first, a.third))
                     }
                 }
-                val bestIdx = res.indices.filter { res[it].name != null }
-                    .maxByOrNull { res[it].adj } ?: -1
-                handler.post {
-                    labels.slots = res; labels.best = bestIdx; labels.status = ""
-                    labels.invalidate()
-                }
+                val bestIdx = res.indices.filter { res[it].name != null }.maxByOrNull { res[it].adj } ?: -1
+                handler.post { labels.slots = res; labels.best = bestIdx; labels.status = ""; labels.invalidate() }
             } catch (_: Throwable) {
             } finally {
                 try { img?.close() } catch (_: Throwable) {}
@@ -354,9 +336,9 @@ class OverlayService : Service() {
 
     private fun rects(w: Int, h: Int): List<Rect> {
         val x = f("row_x", .20f) * w
-        val y = f("row_y", .46f) * h
+        val y = f("row_y", .55f) * h
         val total = f("row_w", .62f) * w
-        val hh = (f("row_h", .06f) * h).toInt().coerceAtLeast(8)
+        val hh = (f("row_h", .16f) * h).toInt().coerceAtLeast(8)
         val gap = f("gap", .02f) * w
         val cw = ((total - gap * 2) / 3).toInt().coerceAtLeast(8)
         return (0..2).map { i ->
@@ -372,9 +354,7 @@ class OverlayService : Service() {
         val pixelStride = plane.pixelStride
         val rowStride = plane.rowStride
         val padding = rowStride - pixelStride * image.width
-        val wide = Bitmap.createBitmap(
-            image.width + padding / pixelStride, image.height, Bitmap.Config.ARGB_8888
-        )
+        val wide = Bitmap.createBitmap(image.width + padding / pixelStride, image.height, Bitmap.Config.ARGB_8888)
         wide.copyPixelsFromBuffer(buf)
         val out = Bitmap.createBitmap(wide, 0, 0, image.width, image.height)
         if (out != wide) wide.recycle()
@@ -413,7 +393,7 @@ class OverlayService : Service() {
         override fun onTouchEvent(e: MotionEvent): Boolean {
             if (!touchDrag) return super.onTouchEvent(e)
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { dx0 = e.rawX; dy0 = e.rawY; ox = f("row_x", .20f); oy = f("row_y", .46f); return true }
+                MotionEvent.ACTION_DOWN -> { dx0 = e.rawX; dy0 = e.rawY; ox = f("row_x", .20f); oy = f("row_y", .55f); return true }
                 MotionEvent.ACTION_MOVE -> {
                     setF("row_x", (ox + (e.rawX - dx0) / sw).coerceIn(0f, .9f))
                     setF("row_y", (oy + (e.rawY - dy0) / sh).coerceIn(0f, .9f))
@@ -432,32 +412,26 @@ class OverlayService : Service() {
             val rects = rects(width, height)
             val alpha = (f("alpha", .88f) * 255).toInt()
             val fs = f("font", 13f) * resources.displayMetrics.density
-            val dy = f("label_dy", .03f) * height
-
+            val dy = f("label_dy", .04f) * height
             if (calib) {
                 paint.style = Paint.Style.STROKE; paint.strokeWidth = 3f
                 paint.color = Color.parseColor("#22D3EE")
                 rects.forEach { canvas.drawRect(it, paint) }
                 paint.style = Paint.Style.FILL
             }
-
             if (status.isNotEmpty()) {
-                tp.textSize = fs
-                tp.color = Color.parseColor("#FED7AA")
+                tp.textSize = fs; tp.color = Color.parseColor("#FED7AA")
                 paint.color = Color.parseColor("#E6150E26")
                 canvas.drawRoundRect(20f, 20f, width - 20f, 20f + fs * 2.2f, 14f, 14f, paint)
                 canvas.drawText(status, 34f, 20f + fs * 1.5f, tp)
             }
-
             slots.forEachIndexed { i, s ->
                 val r = rects[i]
                 val top = r.bottom + dy
                 val w = r.width().toFloat()
                 val lines = ArrayList<String>()
-                if (s.name == null) {
-                    lines.add("не распознано")
-                    if (s.raw.isNotBlank()) lines.add(s.raw.take(22))
-                } else {
+                if (s.name == null) { lines.add("не распознано"); if (s.raw.isNotBlank()) lines.add(s.raw.take(22)) }
+                else {
                     val t = Store.tier(s.adj)
                     lines.add("$t · ${s.adj}" + (if (i == best) "  ★ БЕРИ" else ""))
                     if (p.getBoolean("show_name", true)) lines.add(s.name.take(26))
@@ -465,8 +439,7 @@ class OverlayService : Service() {
                 }
                 val boxH = fs * (lines.size * 1.35f + 0.7f)
                 val tierColor = if (s.name == null) "#7C6FA0" else col(Store.tier(s.adj))
-                paint.color = Color.parseColor("#150E26")
-                paint.alpha = alpha
+                paint.color = Color.parseColor("#150E26"); paint.alpha = alpha
                 canvas.drawRoundRect(r.left.toFloat(), top, r.left + w, top + boxH, 12f, 12f, paint)
                 paint.alpha = 255
                 paint.style = Paint.Style.STROKE; paint.strokeWidth = if (i == best) 4f else 2f
@@ -474,7 +447,6 @@ class OverlayService : Service() {
                 canvas.drawRoundRect(r.left.toFloat(), top, r.left + w, top + boxH, 12f, 12f, paint)
                 paint.style = Paint.Style.FILL
                 canvas.drawRect(r.left.toFloat(), top, r.left + 8f, top + boxH, paint)
-
                 lines.forEachIndexed { li, line ->
                     tp.textSize = if (li == 0) fs * 1.12f else fs * 0.86f
                     tp.isFakeBoldText = li == 0
