@@ -51,6 +51,19 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 33)
             notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
 
+        // Аварийный сторож: если прошлый запуск упал внутри инициализации OCR,
+        // удаляем модели и сбрасываем флаг — приложение стартует чисто без переустановки.
+        val guard = Store.prefs.getInt("ocr_guard", 0)
+        if (guard == 1) {
+            Store.prefs.edit().putInt("ocr_guard", 0).putBoolean("ocr_ok", false).apply()
+            scope.launch(Dispatchers.IO) {
+                listOf("rus", "eng").forEach { Ocr.file(this@MainActivity, it).delete() }
+                withContext(Dispatchers.Main) {
+                    toast("Прошлый запуск прервался при запуске OCR — модели удалены, приложение восстановлено")
+                }
+            }
+        }
+
         val loader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
@@ -77,10 +90,9 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(Bridge(), "Android")
         web.loadUrl("https://appassets.androidplatform.net/assets/index.html")
 
+        // OCR на старте НЕ инициализируем — только загрузка пула.
         scope.launch {
             if (Store.tiers.length() == 0) { try { Store.refresh() } catch (_: Exception) {} }
-            val lang = Store.prefs.getString("ocr_lang", "rus") ?: "rus"
-            withContext(Dispatchers.IO) { Ocr.init(this@MainActivity, lang) }
             pushAll()
         }
     }
@@ -88,7 +100,6 @@ class MainActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
     private fun js(code: String) = web.post { web.evaluateJavascript(code, null) }
     private fun q(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-    private fun push(k: String, v: String) = js("window.AC && AC.nativeUpdate('$k', ${q(v)});")
     private fun pushAll() {
         js("window.AC && AC.setData(${Store.payload()});")
         js("window.AC && AC.setDeck(${Store.prefs.getString("deck", "[]")});")
@@ -108,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun cls(): String = Store.prefs.getString("cls", "mage") ?: "mage"
         @JavascriptInterface fun overlayRunning(): Boolean = OverlayService.running
         @JavascriptInterface fun ocrReady(): Boolean = Ocr.ready()
+        @JavascriptInterface fun ocrOk(): Boolean = Store.prefs.getBoolean("ocr_ok", false)
         @JavascriptInterface fun ocrHas(l: String): Boolean = Ocr.has(this@MainActivity, l)
         @JavascriptInterface fun ocrDiag(): String = Ocr.diag(this@MainActivity)
 
@@ -119,7 +131,9 @@ class MainActivity : AppCompatActivity() {
             scope.launch {
                 val lang = Store.prefs.getString("ocr_lang", "rus") ?: "rus"
                 js("window.AC && AC.setStatus('Проверка OCR ($lang)…');")
+                Store.prefs.edit().putInt("ocr_guard", 1).apply()
                 val ok = withContext(Dispatchers.IO) { Ocr.init(this@MainActivity, lang) }
+                Store.prefs.edit().putInt("ocr_guard", 0).putBoolean("ocr_ok", ok).apply()
                 pushAll()
                 js("window.AC && AC.setStatus(${q(if (ok) "OCR запущен: " + Ocr.engineInfo else "OCR не запустился: " + Ocr.lastError)});")
                 js("window.AC && AC.showDiag(${q(Ocr.diag(this@MainActivity))});")
@@ -138,22 +152,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        @JavascriptInterface fun downloadOcr(lang: String) = downloadOcr2(lang, "std")
+        @JavascriptInterface fun downloadOcr(lang: String) = downloadOcr2(lang, "legacy")
 
         @JavascriptInterface fun downloadOcr2(lang: String, source: String) {
             scope.launch {
                 js("window.AC && AC.setStatus('Скачивание $lang ($source)…');")
                 try {
                     withContext(Dispatchers.IO) {
-                        Ocr.download(this@MainActivity, lang, source) { pct ->
-                            js("window.AC && AC.setStatus('$lang ($source): $pct%');")
-                        }
+                        Ocr.download(this@MainActivity, lang, source) { }
                     }
-                    Store.prefs.edit().putString("ocr_lang", lang).apply()
-                    val ok = withContext(Dispatchers.IO) { Ocr.init(this@MainActivity, lang) }
+                    Store.prefs.edit().putString("ocr_lang", lang).putBoolean("ocr_ok", false).apply()
                     pushAll()
-                    js("window.AC && AC.setStatus(${q(if (ok) "Модель $lang установлена, OCR запущен" else "Модель скачана, но движок её не принял: " + Ocr.lastError)});")
-                    js("window.AC && AC.showDiag(${q(Ocr.diag(this@MainActivity))});")
+                    js("window.AC && AC.setStatus('Модель $lang скачана. Нажмите «Проверить OCR».');")
                 } catch (e: Exception) {
                     js("window.AC && AC.setStatus(${q("Не удалось скачать: " + (e.message ?: ""))});")
                 }
