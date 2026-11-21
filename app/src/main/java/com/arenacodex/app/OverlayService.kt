@@ -344,7 +344,7 @@ class OverlayService : Service() {
                     val hit = Store.match(raw, cls)
                     if (hit == null) res.add(Slot(null, raw, 0, 0, ""))
                     else {
-                        val a = Store.advise(hit.first, cls, deck)
+                        val a = Meta.advise(hit.first, cls, deck)
                         res.add(Slot(hit.first, raw, a.second, a.first, a.third))
                     }
                 }
