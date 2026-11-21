@@ -42,6 +42,7 @@ class OverlayService : Service() {
     private lateinit var labels: LabelView
     private var trigger: LinearLayout? = null
     private var panel: ScrollView? = null
+    private var touchLayer: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var busy = false
@@ -132,6 +133,35 @@ class OverlayService : Service() {
         wm.addView(labels, overlayParams(-1, -1, false, Gravity.TOP or Gravity.START))
     }
 
+    /** Прозрачный слой: пока открыта калибровка, рамку можно таскать пальцем. */
+    private fun addTouchLayer() {
+        if (touchLayer != null) return
+        val v = View(this)
+        v.setBackgroundColor(Color.TRANSPARENT)
+        var sx = 0f; var sy = 0f; var ox = 0f; var oy = 0f; var dragging = false
+        v.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = f("row_x", .10f); oy = f("row_y", .44f); dragging = true; true }
+                MotionEvent.ACTION_MOVE -> {
+                    if (dragging) {
+                        setF("row_x", (ox + (e.rawX - sx) / sw).coerceIn(0f, .9f))
+                        setF("row_y", (oy + (e.rawY - sy) / sh).coerceIn(0f, .9f))
+                        labels.invalidate()
+                    }
+                    true
+                }
+                else -> { dragging = false; true }
+            }
+        }
+        touchLayer = v
+        wm.addView(v, overlayParams(-1, -1, true, Gravity.TOP or Gravity.START))
+    }
+
+    private fun removeTouchLayer() {
+        touchLayer?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        touchLayer = null
+    }
+
     private fun addTrigger() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -165,7 +195,10 @@ class OverlayService : Service() {
     }
 
     private fun togglePanel() {
-        if (panelOpen) { panel?.let { wm.removeView(it) }; panel = null; panelOpen = false; labels.calib = false; labels.invalidate(); return }
+        if (panelOpen) {
+            panel?.let { wm.removeView(it) }; panel = null; panelOpen = false
+            labels.calib = false; labels.invalidate(); removeTouchLayer(); return
+        }
         val ctx = this
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -176,7 +209,7 @@ class OverlayService : Service() {
             text = t; setTextColor(Color.parseColor("#EDE3D2")); textSize = 15f
             setPadding(0, 6, 0, 12); setTypeface(typeface, Typeface.BOLD)
         }
-        root.addView(title("Калибровка · ползунки поверх игры"))
+        root.addView(title("Калибровка: тяните рамку пальцем, размер — ползунками"))
 
         fun slider(label: String, key: String, def: Float, min: Float, max: Float, scale: Float = 100f) {
             val row = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -197,9 +230,7 @@ class OverlayService : Service() {
             row.addView(cap); row.addView(sb); root.addView(row)
         }
 
-        slider("Ряд по вертикали (Y)", "row_y", 0.44f, 0f, 1f)
         slider("Высота области имён", "row_h", 0.07f, 0.01f, 0.4f)
-        slider("Левый край", "row_x", 0.10f, 0f, 0.9f)
         slider("Ширина ряда", "row_w", 0.80f, 0.1f, 1f)
         slider("Зазор между картами", "gap", 0.02f, 0f, 0.2f)
         slider("Отступ подписи вниз", "label_dy", 0.09f, 0f, 0.5f)
@@ -218,25 +249,15 @@ class OverlayService : Service() {
             setOnCheckedChangeListener { _, v -> p.edit().putBoolean("show_name", v).apply(); labels.invalidate() }
         }
         val guides = Switch(ctx).apply {
-            text = "Рамки калибровки"; setTextColor(Color.parseColor("#EDE3D2"))
+            text = "Рамки калибровки + перетаскивание"; setTextColor(Color.parseColor("#EDE3D2"))
             isChecked = true
-            setOnCheckedChangeListener { _, v -> labels.calib = v; labels.invalidate() }
-        }
-        root.addView(auto); root.addView(showName); root.addView(guides)
-
-        val spin = Spinner(ctx)
-        val langs = listOf("rus", "eng")
-        spin.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, langs)
-        spin.setSelection(langs.indexOf(p.getString("ocr_lang", "rus")).coerceAtLeast(0))
-        spin.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(a: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                val l = langs[pos]; p.edit().putString("ocr_lang", l).apply()
-                worker.execute { Ocr.init(ctx, l); handler.post { labels.invalidate() } }
+            setOnCheckedChangeListener { _, v ->
+                labels.calib = v
+                if (v) addTouchLayer() else removeTouchLayer()
+                labels.invalidate()
             }
-            override fun onNothingSelected(a: AdapterView<*>?) {}
         }
-        root.addView(TextView(ctx).apply { text = "Язык OCR"; setTextColor(Color.parseColor("#A79BC4")); textSize = 12f })
-        root.addView(spin)
+        root.addView(guides); root.addView(auto); root.addView(showName)
 
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 16, 0, 0) }
         fun action(t: String, bg: String, act: () -> Unit) = TextView(ctx).apply {
@@ -250,17 +271,38 @@ class OverlayService : Service() {
             listOf("row_y" to .44f, "row_h" to .07f, "row_x" to .10f, "row_w" to .80f,
                 "gap" to .02f, "label_dy" to .09f, "font" to 13f, "alpha" to .88f, "interval" to 1400f)
                 .forEach { setF(it.first, it.second) }
-            togglePanel(); togglePanel()
+            labels.invalidate()
         })
         row.addView(action("Готово", "#A3E635") { togglePanel() })
         root.addView(row)
 
         val sv = ScrollView(ctx)
         sv.addView(root)
-        val lp = overlayParams(-1, (sh * 0.62f).toInt(), true, Gravity.BOTTOM)
+        val lp = overlayParams(-1, (sh * 0.55f).toInt(), true, Gravity.BOTTOM)
         panel = sv; panelOpen = true; labels.calib = true
+        addTouchLayer()
         wm.addView(sv, lp)
         labels.invalidate()
+    }
+
+    /** Ч/б + порог + увеличение: декоративная лента имени читается заметно лучше. */
+    private fun preprocess(src: Bitmap): Bitmap {
+        val big = Bitmap.createScaledBitmap(src, src.width * 4, src.height * 4, true)
+        val out = big.copy(Bitmap.Config.ARGB_8888, true)
+        val n = out.width * out.height
+        val px = IntArray(n)
+        out.getPixels(px, 0, out.width, 0, 0, out.width, out.height)
+        var sum = 0L
+        for (i in 0 until n) {
+            val c = px[i]
+            val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
+            sum += g; px[i] = g
+        }
+        val thr = (sum / n * 0.92).toInt()
+        for (i in 0 until n) px[i] = if (px[i] > thr) Color.WHITE else Color.BLACK
+        out.setPixels(px, 0, out.width, 0, 0, out.width, out.height)
+        if (out !== big) big.recycle()
+        return out
     }
 
     private fun analyze() {
@@ -296,9 +338,9 @@ class OverlayService : Service() {
                 for (i in 0..2) {
                     val rc = rects[i]
                     val crop = Bitmap.createBitmap(bmp, rc.left, rc.top, rc.width(), rc.height())
-                    val scaled = Bitmap.createScaledBitmap(crop, crop.width * 3, crop.height * 3, true)
-                    val raw = Ocr.read(scaled)
-                    crop.recycle(); scaled.recycle()
+                    val clean = preprocess(crop)
+                    val raw = Ocr.read(clean)
+                    crop.recycle(); clean.recycle()
                     val hit = Store.match(raw, cls)
                     if (hit == null) res.add(Slot(null, raw, 0, 0, ""))
                     else {
@@ -353,6 +395,7 @@ class OverlayService : Service() {
     private fun shutdown() {
         running = false
         handler.removeCallbacks(tick)
+        removeTouchLayer()
         try { panel?.let { wm.removeView(it) } } catch (_: Throwable) {}
         try { trigger?.let { wm.removeView(it) } } catch (_: Throwable) {}
         try { wm.removeView(labels) } catch (_: Throwable) {}
