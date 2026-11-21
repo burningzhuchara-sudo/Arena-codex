@@ -48,7 +48,6 @@ object Store {
             meta = o.optJSONObject("meta") ?: JSONObject()
             stamp = o.optString("stamp", stamp)
             live = o.optBoolean("live", false)
-            Synergy.clearCache()
         } catch (_: Exception) {}
     }
 
@@ -129,7 +128,6 @@ object Store {
             meta = m
         } catch (_: Exception) {}
 
-        Synergy.clearCache()
         live = true
         stamp = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("ru")).format(java.util.Date())
         saveCache()
@@ -202,31 +200,38 @@ object Store {
         return 1.0 - prev[n].toDouble() / max(m, n)
     }
 
-    /** Итоговая рекомендация: базовый тир + кривая/роль + механические синергии. */
     fun advise(name: String, cls: String, deck: List<String>): Triple<Int, Int, String> {
         val base = score(cls, name) ?: 60
-        var bonus = 0
-        val why = ArrayList<String>()
-
+        var bonus = 0; val why = ArrayList<String>()
         val c = cost(name)
         val curve = IntArray(8)
         deck.forEach { val k = cost(it); if (k >= 0) curve[min(7, k)]++ }
-        if ((c == 2 || c == 3) && curve[2] + curve[3] < 6) { bonus += 7; why.add("+7 кривая") }
-        if (c >= 6 && curve[6] + curve[7] >= 4) { bonus -= 6; why.add("−6 перегруз топэндом") }
-
+        if ((c == 2 || c == 3) && curve[2] + curve[3] < 6) { bonus += 7; why.add("кривая") }
+        if (c >= 6 && curve[6] + curve[7] >= 4) { bonus -= 6; why.add("перегруз топэндом") }
         val e = meta.optJSONObject(norm(name))
-        val minions = deck.count { meta.optJSONObject(norm(it))?.optString("t") == "MINION" }
-        if (e?.optString("t") == "MINION" && minions < 14) { bonus += 5; why.add("+5 мало существ") }
         val text = norm(e?.optString("x") ?: "")
-        if (text.contains("уничтожает") &&
-            deck.count { norm(meta.optJSONObject(norm(it))?.optString("x") ?: "").contains("уничтожает") } < 3) {
-            bonus += 5; why.add("+5 нужен ремувал")
+        val mechs = e?.optJSONArray("m")
+        var taunt = false; var dr = false
+        if (mechs != null) for (i in 0 until mechs.length()) {
+            val v = mechs.getString(i)
+            if (v == "TAUNT") taunt = true
+            if (v == "DEATHRATTLE") dr = true
         }
-
-        val (syn, swhy) = Synergy.bonus(name, deck)
-        bonus += syn
-        why.addAll(swhy)
-
+        if (text.contains("уничтожает")) { bonus += 5; why.add("ремувал") }
+        if (text.contains("берете") || text.contains("добирает")) { bonus += 4; why.add("добор") }
+        if (taunt) { bonus += 2 }
+        if (dr && deck.count { d ->
+                val mm = meta.optJSONObject(norm(d))?.optJSONArray("m") ?: JSONArray()
+                (0 until mm.length()).any { mm.getString(it) == "DEATHRATTLE" }
+            } >= 3) { bonus += 4; why.add("пакет хрипов") }
+        val race = e?.optString("r") ?: ""
+        if (race.isNotEmpty() && deck.count { meta.optJSONObject(norm(it))?.optString("r") == race } >= 2) {
+            bonus += 6; why.add("типовой пакет")
+        }
+        if (text.contains("к'тун")) {
+            val hasPayoff = deck.any { norm(it).contains("к тун око империи") }
+            if (hasPayoff) { bonus += 8; why.add("усиливает пакет") }
+        }
         return Triple(base, max(1, base + bonus), why.joinToString(" · "))
     }
 
@@ -241,6 +246,7 @@ object Store {
 object Ocr {
     private var api: Any? = null
     private var lang: String = ""
+    private var usedClass: String = ""
     private var mImage: Method? = null
     private var mText: Method? = null
     private var mEnd: Method? = null
@@ -248,7 +254,10 @@ object Ocr {
     var lastError: String = ""
     var engineInfo: String = ""
 
-    private const val CLS = "com.googlecode.tesseract.android.TessBaseAPI"
+    private val CLASSES = listOf(
+        "cz.adaptech.tesseract4android.TessBaseAPI",
+        "com.googlecode.tesseract.android.TessBaseAPI"
+    )
 
     fun dir(ctx: Context): File {
         val d = File(ctx.filesDir, "tessdata"); if (!d.exists()) d.mkdirs(); return d
@@ -288,9 +297,7 @@ object Ocr {
                         }
                     }
                 }
-                if (tmp.length() < 100_000L) {
-                    tmp.delete(); throw IllegalStateException("файл слишком мал (${tmp.length()} Б)")
-                }
+                if (tmp.length() < 100_000L) { tmp.delete(); throw IllegalStateException("файл слишком мал") }
                 val dst = file(ctx, l)
                 if (dst.exists()) dst.delete()
                 if (!tmp.renameTo(dst)) { tmp.copyTo(dst, overwrite = true); tmp.delete() }
@@ -303,51 +310,52 @@ object Ocr {
         if (api != null && lang == l) return true
         if (!has(ctx, l)) { lastError = "Нет файла $l.traineddata. Скачайте модель."; return false }
         release()
-        val cls: Class<*>
-        try { cls = Class.forName(CLS) }
-        catch (t: Throwable) { lastError = "Класс Tesseract не найден: " + t.javaClass.simpleName; return false }
-        val a: Any
-        try { a = cls.getDeclaredConstructor().newInstance() }
-        catch (t: Throwable) { lastError = "Не создан экземпляр: " + (t.cause?.message ?: t.message ?: ""); return false }
 
-        val init2 = cls.methods.firstOrNull {
-            it.name == "init" && it.parameterCount == 2 &&
-                it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java
-        }
-        val init3 = cls.methods.firstOrNull {
-            it.name == "init" && it.parameterCount == 3 &&
-                it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java &&
-                it.parameterTypes[2] == Int::class.javaPrimitiveType
-        }
-        if (init2 == null && init3 == null) { lastError = "Нет метода init"; safeEnd(cls, a); return false }
+        for (cn in CLASSES) {
+            val cls: Class<*> = try { Class.forName(cn) } catch (_: Throwable) { continue }
+            val a: Any = try { cls.getDeclaredConstructor().newInstance() } catch (_: Throwable) { continue }
 
-        val path = ctx.filesDir.absolutePath
-        val attempts = ArrayList<Pair<String, () -> Boolean>>()
-        if (init3 != null) listOf(1, 0, 3, 2).forEach { oem ->
-            attempts.add("OEM $oem" to { (init3.invoke(a, path, l, oem) as? Boolean) ?: false })
-        }
-        if (init2 != null) attempts.add("default" to { (init2.invoke(a, path, l) as? Boolean) ?: false })
+            val init2 = cls.methods.firstOrNull {
+                it.name == "init" && it.parameterCount == 2 &&
+                    it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java
+            }
+            val init3 = cls.methods.firstOrNull {
+                it.name == "init" && it.parameterCount == 3 &&
+                    it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java &&
+                    it.parameterTypes[2] == Int::class.javaPrimitiveType
+            }
+            if (init2 == null && init3 == null) { safeEnd(cls, a); continue }
 
-        var ok = false; var used = ""; var err = ""
-        for ((label, run) in attempts) {
-            try { if (run()) { ok = true; used = label; break } else err = "$label → false" }
-            catch (t: Throwable) { err = "$label → " + t.javaClass.simpleName }
-        }
-        if (!ok) { lastError = "Движок не принял модель ($err). Нужна legacy-модель."; safeEnd(cls, a); return false }
+            val path = ctx.filesDir.absolutePath
+            var ok = false; var used = ""
+            if (init3 != null) {
+                for (oem in listOf(1, 0, 3)) {
+                    ok = try { (init3.invoke(a, path, l, oem) as? Boolean) ?: false } catch (_: Throwable) { false }
+                    if (ok) { used = "OEM $oem"; break }
+                }
+            }
+            if (!ok && init2 != null) {
+                ok = try { (init2.invoke(a, path, l) as? Boolean) ?: false } catch (_: Throwable) { false }
+                if (ok) used = "default"
+            }
+            if (!ok) { lastError = "$cn: движок не принял модель"; safeEnd(cls, a); continue }
 
-        mImage = cls.methods.firstOrNull {
-            it.name == "setImage" && it.parameterCount == 1 && it.parameterTypes[0] == Bitmap::class.java
-        }
-        mText = cls.methods.firstOrNull { (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0 }
-        mEnd = cls.methods.firstOrNull { (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0 }
-        val psm = cls.methods.firstOrNull {
-            it.name == "setPageSegMode" && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.javaPrimitiveType
-        }
-        try { psm?.invoke(a, 7) } catch (_: Throwable) {}
-        if (mImage == null || mText == null) { lastError = "Нет setImage/getUTF8Text"; safeEnd(cls, a); return false }
+            mImage = cls.methods.firstOrNull {
+                it.name == "setImage" && it.parameterCount == 1 && it.parameterTypes[0] == Bitmap::class.java
+            }
+            mText = cls.methods.firstOrNull { (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0 }
+            mEnd = cls.methods.firstOrNull { (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0 }
+            val psm = cls.methods.firstOrNull {
+                it.name == "setPageSegMode" && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.javaPrimitiveType
+            }
+            try { psm?.invoke(a, 7) } catch (_: Throwable) {}
+            if (mImage == null || mText == null) { lastError = "$cn: нет setImage/getUTF8Text"; safeEnd(cls, a); continue }
 
-        api = a; lang = l; engineInfo = used; lastError = ""
-        return true
+            api = a; lang = l; usedClass = cn; engineInfo = used
+            lastError = ""
+            return true
+        }
+        return false
     }
 
     private fun safeEnd(cls: Class<*>, a: Any) {
@@ -368,21 +376,23 @@ object Ocr {
     fun release() {
         val a = api
         if (a != null) { try { mEnd?.invoke(a) } catch (_: Throwable) {} }
-        api = null; lang = ""; mImage = null; mText = null; mEnd = null
+        api = null; lang = ""; usedClass = ""; mImage = null; mText = null; mEnd = null
     }
 
     fun diag(ctx: Context): String {
         val sb = StringBuilder()
-        sb.append("Класс Tesseract: ")
-        try { Class.forName(CLS); sb.append("найден\n") }
-        catch (t: Throwable) { sb.append("НЕ найден (").append(t.javaClass.simpleName).append(")\n") }
+        sb.append("Доступные движки:\n")
+        CLASSES.forEach { cn ->
+            sb.append("  ").append(cn.substringAfterLast('.')).append(": ")
+            try { Class.forName(cn); sb.append("да\n") } catch (_: Throwable) { sb.append("нет\n") }
+        }
         listOf("rus", "eng").forEach { l ->
             val f = file(ctx, l)
             sb.append(l).append(".traineddata: ")
             if (f.exists()) sb.append(String.format("%.2f МБ", f.length() / 1048576.0)).append("\n")
             else sb.append("нет\n")
         }
-        sb.append("Движок: ").append(if (ready()) "запущен ($engineInfo, $lang)" else "не запущен").append("\n")
+        sb.append("Активен: ").append(if (ready()) usedClass.substringAfterLast('.') + " (" + engineInfo + ", " + lang + ")" else "нет").append("\n")
         sb.append("Ошибка: ").append(if (lastError.isEmpty()) "нет" else lastError).append("\n")
         sb.append("Оверлей: ").append(if (OverlayService.running) "включён" else "выключен").append("\n")
         sb.append("Карт в базе: ").append(Store.tiers.length())
