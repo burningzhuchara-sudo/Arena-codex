@@ -122,7 +122,15 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun ocrOk(): Boolean = Store.prefs.getBoolean("ocr_ok", false)
         @JavascriptInterface fun ocrHas(l: String): Boolean = Ocr.has(this@MainActivity, l)
         @JavascriptInterface fun ocrDiag(): String = Ocr.diag(this@MainActivity)
-
+        @JavascriptInterface fun adviseJSON(name: String): String {
+            val cls = Store.prefs.getString("cls", "mage") ?: "mage"
+            val a = Meta.advise(name, cls, Store.deck())
+            val o = org.json.JSONObject()
+            o.put("base", a.first)
+            o.put("adj", a.second)
+            o.put("why", a.third)
+            return o.toString()
+        }
         @JavascriptInterface fun saveDeck(json: String) { Store.prefs.edit().putString("deck", json).apply() }
         @JavascriptInterface fun saveClass(c: String) { Store.prefs.edit().putString("cls", c).apply() }
         @JavascriptInterface fun setPref(k: String, v: String) { Store.prefs.edit().putString(k, v).apply() }
