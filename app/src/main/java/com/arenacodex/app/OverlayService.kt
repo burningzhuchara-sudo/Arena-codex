@@ -135,7 +135,6 @@ class OverlayService : Service() {
         wm.addView(labels, lp)
     }
 
-    /** Включаем/выключаем приём касаний окном с рамками (только в калибровке). */
     private fun setCalibTouchable(on: Boolean) {
         val lp = labelsLp ?: return
         lp.flags = if (on) lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
@@ -188,7 +187,7 @@ class OverlayService : Service() {
             setPadding(26, 18, 26, 22)
         }
         root.addView(TextView(ctx).apply {
-            text = "Калибровка: тяните рамку пальцем по экрану, размер — ползунками"
+            text = "Калибровка: тяните рамку пальцем, размер — ползунками"
             setTextColor(Color.parseColor("#EDE3D2")); textSize = 14f
             setPadding(0, 4, 0, 10); setTypeface(typeface, Typeface.BOLD)
         })
@@ -223,9 +222,7 @@ class OverlayService : Service() {
         val guides = Switch(ctx).apply {
             text = "Рамки калибровки + перетаскивание пальцем"; setTextColor(Color.parseColor("#EDE3D2"))
             isChecked = true
-            setOnCheckedChangeListener { _, v ->
-                labels.calib = v; setCalibTouchable(v); labels.invalidate()
-            }
+            setOnCheckedChangeListener { _, v -> labels.calib = v; setCalibTouchable(v); labels.invalidate() }
         }
         val auto = Switch(ctx).apply {
             text = "Авто-анализ"; setTextColor(Color.parseColor("#EDE3D2"))
@@ -265,8 +262,11 @@ class OverlayService : Service() {
         labels.invalidate()
     }
 
-    private fun preprocess(src: Bitmap): Bitmap {
-        val big = Bitmap.createScaledBitmap(src, src.width * 4, src.height * 4, true)
+    /** Ч/б с НИЗКИМ порогом: тёмный текст → чёрный, всё остальное (рамка, бирюза) → белое. */
+    private fun binarize(src: Bitmap, factor: Float): Bitmap {
+        val trim = (src.width * 0.06).toInt()
+        val cropped = if (trim * 2 < src.width) Bitmap.createBitmap(src, trim, 0, src.width - trim * 2, src.height) else src
+        val big = Bitmap.createScaledBitmap(cropped, cropped.width * 4, cropped.height * 4, true)
         val out = big.copy(Bitmap.Config.ARGB_8888, true)
         val n = out.width * out.height
         val px = IntArray(n)
@@ -277,12 +277,16 @@ class OverlayService : Service() {
             val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
             sum += g; px[i] = g
         }
-        val thr = (sum / n * 0.92).toInt()
+        val thr = (sum / n * factor).toInt()
         for (i in 0 until n) px[i] = if (px[i] > thr) Color.WHITE else Color.BLACK
         out.setPixels(px, 0, out.width, 0, 0, out.width, out.height)
+        if (cropped !== src) cropped.recycle()
         if (out !== big) big.recycle()
         return out
     }
+
+    private fun variants(src: Bitmap): List<Bitmap> =
+        listOf(binarize(src, 0.60f), binarize(src, 0.45f), binarize(src, 0.78f))
 
     private fun analyze() {
         if (busy || !running) return
@@ -317,10 +321,16 @@ class OverlayService : Service() {
                 for (i in 0..2) {
                     val rc = rects[i]
                     val crop = Bitmap.createBitmap(bmp, rc.left, rc.top, rc.width(), rc.height())
-                    val clean = preprocess(crop)
-                    val raw = Ocr.read(clean)
-                    crop.recycle(); clean.recycle()
-                    val hit = Store.match(raw, cls)
+                    val vs = variants(crop)
+                    var raw = ""; var hit: Pair<String, Int>? = null
+                    for (v in vs) {
+                        val t = Ocr.read(v)
+                        if (raw.isEmpty()) raw = t
+                        val m = Store.match(t, cls)
+                        if (m != null) { raw = t; hit = m; break }
+                    }
+                    vs.forEach { it.recycle() }
+                    crop.recycle()
                     if (hit == null) res.add(Slot(null, raw, 0, 0, ""))
                     else {
                         val a = Store.advise(hit.first, cls, deck)
@@ -400,7 +410,6 @@ class OverlayService : Service() {
         private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
         private var dx0 = 0f; private var dy0 = 0f; private var ox = 0f; private var oy = 0f
 
-        /** Перетаскивание рамки пальцем, когда включена калибровка. */
         override fun onTouchEvent(e: MotionEvent): Boolean {
             if (!touchDrag) return super.onTouchEvent(e)
             when (e.actionMasked) {
