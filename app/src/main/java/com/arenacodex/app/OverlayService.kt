@@ -40,9 +40,9 @@ class OverlayService : Service() {
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
     private lateinit var labels: LabelView
+    private var labelsLp: WindowManager.LayoutParams? = null
     private var trigger: LinearLayout? = null
     private var panel: ScrollView? = null
-    private var touchLayer: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var busy = false
@@ -130,36 +130,18 @@ class OverlayService : Service() {
 
     private fun addLabels() {
         labels = LabelView(this)
-        wm.addView(labels, overlayParams(-1, -1, false, Gravity.TOP or Gravity.START))
+        val lp = overlayParams(-1, -1, false, Gravity.TOP or Gravity.START)
+        labelsLp = lp
+        wm.addView(labels, lp)
     }
 
-    /** Прозрачный слой: пока открыта калибровка, рамку можно таскать пальцем. */
-    private fun addTouchLayer() {
-        if (touchLayer != null) return
-        val v = View(this)
-        v.setBackgroundColor(Color.TRANSPARENT)
-        var sx = 0f; var sy = 0f; var ox = 0f; var oy = 0f; var dragging = false
-        v.setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = f("row_x", .10f); oy = f("row_y", .44f); dragging = true; true }
-                MotionEvent.ACTION_MOVE -> {
-                    if (dragging) {
-                        setF("row_x", (ox + (e.rawX - sx) / sw).coerceIn(0f, .9f))
-                        setF("row_y", (oy + (e.rawY - sy) / sh).coerceIn(0f, .9f))
-                        labels.invalidate()
-                    }
-                    true
-                }
-                else -> { dragging = false; true }
-            }
-        }
-        touchLayer = v
-        wm.addView(v, overlayParams(-1, -1, true, Gravity.TOP or Gravity.START))
-    }
-
-    private fun removeTouchLayer() {
-        touchLayer?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
-        touchLayer = null
+    /** Включаем/выключаем приём касаний окном с рамками (только в калибровке). */
+    private fun setCalibTouchable(on: Boolean) {
+        val lp = labelsLp ?: return
+        lp.flags = if (on) lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        else lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        try { wm.updateViewLayout(labels, lp) } catch (_: Throwable) {}
+        labels.touchDrag = on
     }
 
     private fun addTrigger() {
@@ -197,19 +179,19 @@ class OverlayService : Service() {
     private fun togglePanel() {
         if (panelOpen) {
             panel?.let { wm.removeView(it) }; panel = null; panelOpen = false
-            labels.calib = false; labels.invalidate(); removeTouchLayer(); return
+            labels.calib = false; setCalibTouchable(false); labels.invalidate(); return
         }
         val ctx = this
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#F2150E26"))
-            setPadding(26, 22, 26, 26)
+            setPadding(26, 18, 26, 22)
         }
-        fun title(t: String) = TextView(ctx).apply {
-            text = t; setTextColor(Color.parseColor("#EDE3D2")); textSize = 15f
-            setPadding(0, 6, 0, 12); setTypeface(typeface, Typeface.BOLD)
-        }
-        root.addView(title("Калибровка: тяните рамку пальцем, размер — ползунками"))
+        root.addView(TextView(ctx).apply {
+            text = "Калибровка: тяните рамку пальцем по экрану, размер — ползунками"
+            setTextColor(Color.parseColor("#EDE3D2")); textSize = 14f
+            setPadding(0, 4, 0, 10); setTypeface(typeface, Typeface.BOLD)
+        })
 
         fun slider(label: String, key: String, def: Float, min: Float, max: Float, scale: Float = 100f) {
             val row = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -230,14 +212,21 @@ class OverlayService : Service() {
             row.addView(cap); row.addView(sb); root.addView(row)
         }
 
-        slider("Высота области имён", "row_h", 0.07f, 0.01f, 0.4f)
-        slider("Ширина ряда", "row_w", 0.80f, 0.1f, 1f)
+        slider("Высота области имён", "row_h", 0.06f, 0.01f, 0.4f)
+        slider("Ширина ряда", "row_w", 0.62f, 0.1f, 1f)
         slider("Зазор между картами", "gap", 0.02f, 0f, 0.2f)
-        slider("Отступ подписи вниз", "label_dy", 0.09f, 0f, 0.5f)
+        slider("Отступ подписи вниз", "label_dy", 0.03f, 0f, 0.5f)
         slider("Размер шрифта", "font", 13f, 8f, 28f, 1f)
         slider("Прозрачность фона", "alpha", 0.88f, 0.2f, 1f)
         slider("Интервал анализа, мс", "interval", 1400f, 400f, 5000f, 1f)
 
+        val guides = Switch(ctx).apply {
+            text = "Рамки калибровки + перетаскивание пальцем"; setTextColor(Color.parseColor("#EDE3D2"))
+            isChecked = true
+            setOnCheckedChangeListener { _, v ->
+                labels.calib = v; setCalibTouchable(v); labels.invalidate()
+            }
+        }
         val auto = Switch(ctx).apply {
             text = "Авто-анализ"; setTextColor(Color.parseColor("#EDE3D2"))
             isChecked = p.getBoolean("auto", true)
@@ -248,28 +237,19 @@ class OverlayService : Service() {
             isChecked = p.getBoolean("show_name", true)
             setOnCheckedChangeListener { _, v -> p.edit().putBoolean("show_name", v).apply(); labels.invalidate() }
         }
-        val guides = Switch(ctx).apply {
-            text = "Рамки калибровки + перетаскивание"; setTextColor(Color.parseColor("#EDE3D2"))
-            isChecked = true
-            setOnCheckedChangeListener { _, v ->
-                labels.calib = v
-                if (v) addTouchLayer() else removeTouchLayer()
-                labels.invalidate()
-            }
-        }
         root.addView(guides); root.addView(auto); root.addView(showName)
 
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 16, 0, 0) }
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 14, 0, 0) }
         fun action(t: String, bg: String, act: () -> Unit) = TextView(ctx).apply {
             text = t; setTextColor(Color.parseColor("#0A0713")); textSize = 14f
-            setBackgroundColor(Color.parseColor(bg)); setPadding(26, 16, 26, 16)
+            setBackgroundColor(Color.parseColor(bg)); setPadding(26, 14, 26, 14)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = 10 }
             setOnClickListener { act() }
         }
         row.addView(action("Анализ", "#F5B942") { analyze() })
         row.addView(action("Сброс", "#22D3EE") {
-            listOf("row_y" to .44f, "row_h" to .07f, "row_x" to .10f, "row_w" to .80f,
-                "gap" to .02f, "label_dy" to .09f, "font" to 13f, "alpha" to .88f, "interval" to 1400f)
+            listOf("row_y" to .46f, "row_h" to .06f, "row_x" to .20f, "row_w" to .62f,
+                "gap" to .02f, "label_dy" to .03f, "font" to 13f, "alpha" to .88f, "interval" to 1400f)
                 .forEach { setF(it.first, it.second) }
             labels.invalidate()
         })
@@ -278,14 +258,13 @@ class OverlayService : Service() {
 
         val sv = ScrollView(ctx)
         sv.addView(root)
-        val lp = overlayParams(-1, (sh * 0.55f).toInt(), true, Gravity.BOTTOM)
-        panel = sv; panelOpen = true; labels.calib = true
-        addTouchLayer()
+        val lp = overlayParams(-1, (sh * 0.45f).toInt(), true, Gravity.BOTTOM)
+        panel = sv; panelOpen = true
+        labels.calib = true; setCalibTouchable(true)
         wm.addView(sv, lp)
         labels.invalidate()
     }
 
-    /** Ч/б + порог + увеличение: декоративная лента имени читается заметно лучше. */
     private fun preprocess(src: Bitmap): Bitmap {
         val big = Bitmap.createScaledBitmap(src, src.width * 4, src.height * 4, true)
         val out = big.copy(Bitmap.Config.ARGB_8888, true)
@@ -344,7 +323,7 @@ class OverlayService : Service() {
                     val hit = Store.match(raw, cls)
                     if (hit == null) res.add(Slot(null, raw, 0, 0, ""))
                     else {
-                        val a = Meta.advise(hit.first, cls, deck)
+                        val a = Store.advise(hit.first, cls, deck)
                         res.add(Slot(hit.first, raw, a.second, a.first, a.third))
                     }
                 }
@@ -364,10 +343,10 @@ class OverlayService : Service() {
     }
 
     private fun rects(w: Int, h: Int): List<Rect> {
-        val x = f("row_x", .10f) * w
-        val y = f("row_y", .44f) * h
-        val total = f("row_w", .80f) * w
-        val hh = (f("row_h", .07f) * h).toInt().coerceAtLeast(8)
+        val x = f("row_x", .20f) * w
+        val y = f("row_y", .46f) * h
+        val total = f("row_w", .62f) * w
+        val hh = (f("row_h", .06f) * h).toInt().coerceAtLeast(8)
         val gap = f("gap", .02f) * w
         val cw = ((total - gap * 2) / 3).toInt().coerceAtLeast(8)
         return (0..2).map { i ->
@@ -395,7 +374,6 @@ class OverlayService : Service() {
     private fun shutdown() {
         running = false
         handler.removeCallbacks(tick)
-        removeTouchLayer()
         try { panel?.let { wm.removeView(it) } } catch (_: Throwable) {}
         try { trigger?.let { wm.removeView(it) } } catch (_: Throwable) {}
         try { wm.removeView(labels) } catch (_: Throwable) {}
@@ -417,8 +395,24 @@ class OverlayService : Service() {
         var best: Int = -1
         var status: String = ""
         var calib = false
+        var touchDrag = false
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var dx0 = 0f; private var dy0 = 0f; private var ox = 0f; private var oy = 0f
+
+        /** Перетаскивание рамки пальцем, когда включена калибровка. */
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            if (!touchDrag) return super.onTouchEvent(e)
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { dx0 = e.rawX; dy0 = e.rawY; ox = f("row_x", .20f); oy = f("row_y", .46f); return true }
+                MotionEvent.ACTION_MOVE -> {
+                    setF("row_x", (ox + (e.rawX - dx0) / sw).coerceIn(0f, .9f))
+                    setF("row_y", (oy + (e.rawY - dy0) / sh).coerceIn(0f, .9f))
+                    invalidate(); return true
+                }
+            }
+            return super.onTouchEvent(e)
+        }
 
         private fun col(t: String) = when (t) {
             "S" -> "#F5B942"; "A" -> "#A3E635"; "B" -> "#22D3EE"; "C" -> "#8B5CF6"
@@ -429,7 +423,7 @@ class OverlayService : Service() {
             val rects = rects(width, height)
             val alpha = (f("alpha", .88f) * 255).toInt()
             val fs = f("font", 13f) * resources.displayMetrics.density
-            val dy = f("label_dy", .09f) * height
+            val dy = f("label_dy", .03f) * height
 
             if (calib) {
                 paint.style = Paint.Style.STROKE; paint.strokeWidth = 3f
