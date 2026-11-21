@@ -267,12 +267,22 @@ class OverlayService : Service() {
             var img: Image? = null
             var bmp: Bitmap? = null
             try {
+                if (!Store.prefs.getBoolean("ocr_ok", false)) {
+                    handler.post {
+                        labels.status = "OCR не проверен: в приложении нажмите «Проверить OCR»"
+                        labels.invalidate()
+                    }
+                    busy = false; return@execute
+                }
                 img = r.acquireLatestImage()
                 if (img == null) { busy = false; return@execute }
                 bmp = toBitmap(img)
                 val lang = p.getString("ocr_lang", "rus") ?: "rus"
                 if (!Ocr.init(this, lang)) {
-                    handler.post { labels.status = "Нет OCR-данных: скачайте язык в приложении"; labels.invalidate() }
+                    handler.post {
+                        labels.status = if (Ocr.lastError.isEmpty()) "OCR не готов" else Ocr.lastError
+                        labels.invalidate()
+                    }
                     busy = false; return@execute
                 }
                 val cls = p.getString("cls", "mage") ?: "mage"
@@ -306,7 +316,6 @@ class OverlayService : Service() {
             }
         }
     }
-
     private fun rects(w: Int, h: Int): List<Rect> {
         val x = f("row_x", .10f) * w
         val y = f("row_y", .44f) * h
