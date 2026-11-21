@@ -48,6 +48,7 @@ object Store {
             meta = o.optJSONObject("meta") ?: JSONObject()
             stamp = o.optString("stamp", stamp)
             live = o.optBoolean("live", false)
+            Synergy.clearCache()
         } catch (_: Exception) {}
     }
 
@@ -128,6 +129,7 @@ object Store {
             meta = m
         } catch (_: Exception) {}
 
+        Synergy.clearCache()
         live = true
         stamp = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("ru")).format(java.util.Date())
         saveCache()
@@ -200,38 +202,31 @@ object Store {
         return 1.0 - prev[n].toDouble() / max(m, n)
     }
 
+    /** Итоговая рекомендация: базовый тир + кривая/роль + механические синергии. */
     fun advise(name: String, cls: String, deck: List<String>): Triple<Int, Int, String> {
         val base = score(cls, name) ?: 60
-        var bonus = 0; val why = ArrayList<String>()
+        var bonus = 0
+        val why = ArrayList<String>()
+
         val c = cost(name)
         val curve = IntArray(8)
         deck.forEach { val k = cost(it); if (k >= 0) curve[min(7, k)]++ }
-        if ((c == 2 || c == 3) && curve[2] + curve[3] < 6) { bonus += 7; why.add("кривая") }
-        if (c >= 6 && curve[6] + curve[7] >= 4) { bonus -= 6; why.add("перегруз топэндом") }
+        if ((c == 2 || c == 3) && curve[2] + curve[3] < 6) { bonus += 7; why.add("+7 кривая") }
+        if (c >= 6 && curve[6] + curve[7] >= 4) { bonus -= 6; why.add("−6 перегруз топэндом") }
+
         val e = meta.optJSONObject(norm(name))
+        val minions = deck.count { meta.optJSONObject(norm(it))?.optString("t") == "MINION" }
+        if (e?.optString("t") == "MINION" && minions < 14) { bonus += 5; why.add("+5 мало существ") }
         val text = norm(e?.optString("x") ?: "")
-        val mechs = e?.optJSONArray("m")
-        var taunt = false; var dr = false
-        if (mechs != null) for (i in 0 until mechs.length()) {
-            val v = mechs.getString(i)
-            if (v == "TAUNT") taunt = true
-            if (v == "DEATHRATTLE") dr = true
+        if (text.contains("уничтожает") &&
+            deck.count { norm(meta.optJSONObject(norm(it))?.optString("x") ?: "").contains("уничтожает") } < 3) {
+            bonus += 5; why.add("+5 нужен ремувал")
         }
-        if (text.contains("уничтожает")) { bonus += 5; why.add("ремувал") }
-        if (text.contains("берете") || text.contains("добирает")) { bonus += 4; why.add("добор") }
-        if (taunt) bonus += 2
-        if (dr && deck.count { d ->
-                val mm = meta.optJSONObject(norm(d))?.optJSONArray("m") ?: JSONArray()
-                (0 until mm.length()).any { mm.getString(it) == "DEATHRATTLE" }
-            } >= 3) { bonus += 4; why.add("пакет хрипов") }
-        val race = e?.optString("r") ?: ""
-        if (race.isNotEmpty() && deck.count { meta.optJSONObject(norm(it))?.optString("r") == race } >= 2) {
-            bonus += 6; why.add("типовой пакет")
-        }
-        if (text.contains("к'тун")) {
-            val hasPayoff = deck.any { norm(it).contains("к тун око империи") }
-            if (hasPayoff) { bonus += 8; why.add("усиливает пакет") }
-        }
+
+        val (syn, swhy) = Synergy.bonus(name, deck)
+        bonus += syn
+        why.addAll(swhy)
+
         return Triple(base, max(1, base + bonus), why.joinToString(" · "))
     }
 
@@ -294,13 +289,11 @@ object Ocr {
                     }
                 }
                 if (tmp.length() < 100_000L) {
-                    tmp.delete(); throw IllegalStateException("файл слишком мал (${tmp.length()} Б) — источник недоступен")
+                    tmp.delete(); throw IllegalStateException("файл слишком мал (${tmp.length()} Б)")
                 }
                 val dst = file(ctx, l)
                 if (dst.exists()) dst.delete()
-                if (!tmp.renameTo(dst)) {
-                    tmp.copyTo(dst, overwrite = true); tmp.delete()
-                }
+                if (!tmp.renameTo(dst)) { tmp.copyTo(dst, overwrite = true); tmp.delete() }
             }
             release()
             lastError = ""
@@ -308,25 +301,14 @@ object Ocr {
 
     fun init(ctx: Context, l: String): Boolean {
         if (api != null && lang == l) return true
-        if (!has(ctx, l)) {
-            lastError = "Нет файла $l.traineddata (или он повреждён). Скачайте модель заново."
-            return false
-        }
+        if (!has(ctx, l)) { lastError = "Нет файла $l.traineddata. Скачайте модель."; return false }
         release()
         val cls: Class<*>
-        try {
-            cls = Class.forName(CLS)
-        } catch (t: Throwable) {
-            lastError = "Класс Tesseract не найден: " + t.javaClass.simpleName + " / " + (t.message ?: "")
-            return false
-        }
+        try { cls = Class.forName(CLS) }
+        catch (t: Throwable) { lastError = "Класс Tesseract не найден: " + t.javaClass.simpleName; return false }
         val a: Any
-        try {
-            a = cls.getDeclaredConstructor().newInstance()
-        } catch (t: Throwable) {
-            lastError = "Не создан экземпляр: " + t.javaClass.simpleName + " / " + (t.cause?.message ?: t.message ?: "")
-            return false
-        }
+        try { a = cls.getDeclaredConstructor().newInstance() }
+        catch (t: Throwable) { lastError = "Не создан экземпляр: " + (t.cause?.message ?: t.message ?: ""); return false }
 
         val init2 = cls.methods.firstOrNull {
             it.name == "init" && it.parameterCount == 2 &&
@@ -337,53 +319,32 @@ object Ocr {
                 it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java &&
                 it.parameterTypes[2] == Int::class.javaPrimitiveType
         }
-        if (init2 == null && init3 == null) {
-            lastError = "В библиотеке нет метода init(String,String[,int])"
-            safeEnd(cls, a); return false
-        }
+        if (init2 == null && init3 == null) { lastError = "Нет метода init"; safeEnd(cls, a); return false }
 
         val path = ctx.filesDir.absolutePath
         val attempts = ArrayList<Pair<String, () -> Boolean>>()
-        if (init3 != null) {
-            listOf(1, 0, 3, 2).forEach { oem ->
-                attempts.add("OEM $oem" to { (init3.invoke(a, path, l, oem) as? Boolean) ?: false })
-            }
+        if (init3 != null) listOf(1, 0, 3, 2).forEach { oem ->
+            attempts.add("OEM $oem" to { (init3.invoke(a, path, l, oem) as? Boolean) ?: false })
         }
         if (init2 != null) attempts.add("default" to { (init2.invoke(a, path, l) as? Boolean) ?: false })
 
         var ok = false; var used = ""; var err = ""
         for ((label, run) in attempts) {
-            try {
-                if (run()) { ok = true; used = label; break } else err = "$label → false"
-            } catch (t: Throwable) {
-                err = "$label → " + t.javaClass.simpleName + ": " + (t.cause?.message ?: t.message ?: "")
-            }
+            try { if (run()) { ok = true; used = label; break } else err = "$label → false" }
+            catch (t: Throwable) { err = "$label → " + t.javaClass.simpleName }
         }
-        if (!ok) {
-            lastError = "Движок не принял модель ($err). Нужна legacy-модель: кнопка «rus legacy»."
-            safeEnd(cls, a)
-            return false
-        }
+        if (!ok) { lastError = "Движок не принял модель ($err). Нужна legacy-модель."; safeEnd(cls, a); return false }
 
         mImage = cls.methods.firstOrNull {
             it.name == "setImage" && it.parameterCount == 1 && it.parameterTypes[0] == Bitmap::class.java
         }
-        mText = cls.methods.firstOrNull {
-            (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0
-        }
-        mEnd = cls.methods.firstOrNull {
-            (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
-        }
+        mText = cls.methods.firstOrNull { (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0 }
+        mEnd = cls.methods.firstOrNull { (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0 }
         val psm = cls.methods.firstOrNull {
-            it.name == "setPageSegMode" && it.parameterCount == 1 &&
-                it.parameterTypes[0] == Int::class.javaPrimitiveType
+            it.name == "setPageSegMode" && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.javaPrimitiveType
         }
         try { psm?.invoke(a, 7) } catch (_: Throwable) {}
-
-        if (mImage == null || mText == null) {
-            lastError = "Нет методов setImage/getUTF8Text в библиотеке"
-            safeEnd(cls, a); return false
-        }
+        if (mImage == null || mText == null) { lastError = "Нет setImage/getUTF8Text"; safeEnd(cls, a); return false }
 
         api = a; lang = l; engineInfo = used; lastError = ""
         return true
@@ -391,9 +352,7 @@ object Ocr {
 
     private fun safeEnd(cls: Class<*>, a: Any) {
         try {
-            cls.methods.firstOrNull {
-                (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0
-            }?.invoke(a)
+            cls.methods.firstOrNull { (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0 }?.invoke(a)
         } catch (_: Throwable) {}
     }
 
@@ -402,14 +361,8 @@ object Ocr {
         val img = mImage ?: return ""
         val txt = mText ?: return ""
         return try {
-            synchronized(a) {
-                img.invoke(a, bmp)
-                (txt.invoke(a) as? String ?: "").trim()
-            }
-        } catch (t: Throwable) {
-            lastError = "Чтение кадра: " + t.javaClass.simpleName
-            ""
-        }
+            synchronized(a) { img.invoke(a, bmp); (txt.invoke(a) as? String ?: "").trim() }
+        } catch (t: Throwable) { lastError = "Чтение кадра: " + t.javaClass.simpleName; "" }
     }
 
     fun release() {
@@ -430,9 +383,9 @@ object Ocr {
             else sb.append("нет\n")
         }
         sb.append("Движок: ").append(if (ready()) "запущен ($engineInfo, $lang)" else "не запущен").append("\n")
-        sb.append("Последняя ошибка: ").append(if (lastError.isEmpty()) "нет" else lastError).append("\n")
+        sb.append("Ошибка: ").append(if (lastError.isEmpty()) "нет" else lastError).append("\n")
         sb.append("Оверлей: ").append(if (OverlayService.running) "включён" else "выключен").append("\n")
-        sb.append("Карт в базе: ").append(Store.tiers.length()).append(" классов")
+        sb.append("Карт в базе: ").append(tiers.length())
         return sb.toString()
     }
 }
