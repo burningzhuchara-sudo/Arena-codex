@@ -104,7 +104,6 @@ object Store {
         }
         if (count < 200) throw IllegalStateException("Источник вернул слишком мало карт")
         tiers = out
-
         try {
             val cards = JSONArray(get("https://api.hearthstonejson.com/v1/latest/ruRU/cards.collectible.json"))
             val m = JSONObject()
@@ -127,7 +126,6 @@ object Store {
             }
             meta = m
         } catch (_: Exception) {}
-
         live = true
         stamp = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("ru")).format(java.util.Date())
         saveCache()
@@ -162,6 +160,7 @@ object Store {
         s >= 60 -> "D"; s >= 40 -> "E"; else -> "F"
     }
 
+    /** Сопоставление по имени (нечёткое). */
     fun match(raw: String, cls: String): Pair<String, Int>? {
         val q = norm(raw)
         if (q.length < 3) return null
@@ -181,6 +180,29 @@ object Store {
             if (sim > bestSim) { bestSim = sim; best = c }
         }
         return if (bestSim >= 0.60) best else null
+    }
+
+    /** Сопоставление по распознанному ТЕКСТУ карты (основной способ в оверлее). */
+    fun matchByText(raw: String, cls: String): Pair<String, Int>? {
+        val q = norm(raw)
+        if (q.length < 12) return null
+        val qt = q.split(" ").filter { it.length > 3 }.toSet()
+        if (qt.isEmpty()) return null
+        var best: Pair<String, Int>? = null
+        var bestS = 0.0
+        for (c in pool(cls) + pool("any")) {
+            val m = meta.optJSONObject(norm(c.first)) ?: continue
+            val xt = norm(m.optString("x"))
+            val xtoks = xt.split(" ").filter { it.length > 3 }.toSet()
+            if (xtoks.isEmpty()) continue
+            val inter = qt.intersect(xtoks).size
+            if (inter == 0) continue
+            val dice = 2.0 * inter / (qt.size + xtoks.size)
+            val cov = inter.toDouble() / qt.size
+            val s = max(dice, cov * 0.9)
+            if (s > bestS) { bestS = s; best = c }
+        }
+        return if (bestS >= 0.30) best else null
     }
 
     private fun similarity(a: String, b: String): Double {
@@ -207,7 +229,7 @@ object Store {
         val curve = IntArray(8)
         deck.forEach { val k = cost(it); if (k >= 0) curve[min(7, k)]++ }
         if ((c == 2 || c == 3) && curve[2] + curve[3] < 6) { bonus += 7; why.add("кривая") }
-        if (c >= 6 && curve[6] + curve[7] >= 4) { bonus -= 6; why.add("перегруз топэндом") }
+        if (c >= 6 && curve[6] + curve[7] >= 4) { bonus -= 6; why.add("перегруз") }
         val e = meta.optJSONObject(norm(name))
         val text = norm(e?.optString("x") ?: "")
         val mechs = e?.optJSONArray("m")
@@ -223,14 +245,13 @@ object Store {
         if (dr && deck.count { d ->
                 val mm = meta.optJSONObject(norm(d))?.optJSONArray("m") ?: JSONArray()
                 (0 until mm.length()).any { mm.getString(it) == "DEATHRATTLE" }
-            } >= 3) { bonus += 4; why.add("пакет хрипов") }
+            } >= 3) { bonus += 4; why.add("хрипы") }
         val race = e?.optString("r") ?: ""
         if (race.isNotEmpty() && deck.count { meta.optJSONObject(norm(it))?.optString("r") == race } >= 2) {
-            bonus += 6; why.add("типовой пакет")
+            bonus += 6; why.add("тип-пакет")
         }
         if (text.contains("к'тун")) {
-            val hasPayoff = deck.any { norm(it).contains("к тун око империи") }
-            if (hasPayoff) { bonus += 8; why.add("усиливает пакет") }
+            if (deck.any { norm(it).contains("к тун око империи") }) { bonus += 8; why.add("пакет богов") }
         }
         return Triple(base, max(1, base + bonus), why.joinToString(" · "))
     }
@@ -250,6 +271,7 @@ object Ocr {
     private var mImage: Method? = null
     private var mText: Method? = null
     private var mEnd: Method? = null
+    private var mPsm: Method? = null
 
     var lastError: String = ""
     var engineInfo: String = ""
@@ -310,11 +332,9 @@ object Ocr {
         if (api != null && lang == l) return true
         if (!has(ctx, l)) { lastError = "Нет файла $l.traineddata. Скачайте модель."; return false }
         release()
-
         for (cn in CLASSES) {
             val cls: Class<*> = try { Class.forName(cn) } catch (_: Throwable) { continue }
             val a: Any = try { cls.getDeclaredConstructor().newInstance() } catch (_: Throwable) { continue }
-
             val init2 = cls.methods.firstOrNull {
                 it.name == "init" && it.parameterCount == 2 &&
                     it.parameterTypes[0] == String::class.java && it.parameterTypes[1] == String::class.java
@@ -325,32 +345,28 @@ object Ocr {
                     it.parameterTypes[2] == Int::class.javaPrimitiveType
             }
             if (init2 == null && init3 == null) { safeEnd(cls, a); continue }
-
             val path = ctx.filesDir.absolutePath
             var ok = false; var used = ""
-            if (init3 != null) {
-                for (oem in listOf(1, 0, 3)) {
-                    ok = try { (init3.invoke(a, path, l, oem) as? Boolean) ?: false } catch (_: Throwable) { false }
-                    if (ok) { used = "OEM $oem"; break }
-                }
+            if (init3 != null) for (oem in listOf(1, 0, 3)) {
+                ok = try { (init3.invoke(a, path, l, oem) as? Boolean) ?: false } catch (_: Throwable) { false }
+                if (ok) { used = "OEM $oem"; break }
             }
             if (!ok && init2 != null) {
                 ok = try { (init2.invoke(a, path, l) as? Boolean) ?: false } catch (_: Throwable) { false }
                 if (ok) used = "default"
             }
             if (!ok) { lastError = "$cn: движок не принял модель"; safeEnd(cls, a); continue }
-
             mImage = cls.methods.firstOrNull {
                 it.name == "setImage" && it.parameterCount == 1 && it.parameterTypes[0] == Bitmap::class.java
             }
             mText = cls.methods.firstOrNull { (it.name == "getUTF8Text" || it.name == "getUT8Text") && it.parameterCount == 0 }
             mEnd = cls.methods.firstOrNull { (it.name == "end" || it.name == "recycle" || it.name == "stop") && it.parameterCount == 0 }
-            val psm = cls.methods.firstOrNull {
+            mPsm = cls.methods.firstOrNull {
                 it.name == "setPageSegMode" && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.javaPrimitiveType
             }
-            try { psm?.invoke(a, 7) } catch (_: Throwable) {}
+            // PSM 6 = единый блок текста (подходит для рамки описания карты)
+            try { mPsm?.invoke(a, 6) } catch (_: Throwable) {}
             if (mImage == null || mText == null) { lastError = "$cn: нет setImage/getUTF8Text"; safeEnd(cls, a); continue }
-
             api = a; lang = l; usedClass = cn; engineInfo = used
             lastError = ""
             return true
@@ -376,12 +392,12 @@ object Ocr {
     fun release() {
         val a = api
         if (a != null) { try { mEnd?.invoke(a) } catch (_: Throwable) {} }
-        api = null; lang = ""; usedClass = ""; mImage = null; mText = null; mEnd = null
+        api = null; lang = ""; usedClass = ""; mImage = null; mText = null; mEnd = null; mPsm = null
     }
 
     fun diag(ctx: Context): String {
         val sb = StringBuilder()
-        sb.append("Доступные движки:\n")
+        sb.append("Движки:\n")
         CLASSES.forEach { cn ->
             sb.append("  ").append(cn.substringAfterLast('.')).append(": ")
             try { Class.forName(cn); sb.append("да\n") } catch (_: Throwable) { sb.append("нет\n") }
