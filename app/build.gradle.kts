@@ -11,8 +11,8 @@ android {
         applicationId = "com.arenacodex.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.2"
         resourceConfigurations += listOf("ru", "en")
     }
 
@@ -38,5 +38,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.17.2")
-    implementation("com.rmtheis:tess-two:9.1.0")
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")
 }
