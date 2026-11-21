@@ -325,4 +325,14 @@ setInterval(function(){if(S.tab==="overlay")poll()},1500);
 render();
 if(NAT){try{AC.setData(Android.payload());AC.setDeck(Android.deck());AC.setClass(Android.cls());if(!D.live)Android.refresh()}catch(e){}}}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();
+/* === МОСТ НА РОДНОЙ ДВИЖОК СИНЕРГИЙ (Meta.kt) === */
+var _localAdvise = advise;
+if (NAT) {
+  advise = function (n) {
+    try {
+      var j = JSON.parse(Android.adviseJSON(n));
+      return { n: n, base: j.base, adj: j.adj, why: j.why };
+    } catch (e) { return _localAdvise(n); }
+  };
+}
 </script></body></html>
