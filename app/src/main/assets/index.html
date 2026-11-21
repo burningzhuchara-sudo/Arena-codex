@@ -61,8 +61,11 @@ main{padding:12px 10px 20px;max-width:1180px;margin:0 auto}
 .off{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--ln);cursor:pointer;background:var(--s1)}
 .off.best{border-color:var(--gold);box-shadow:0 0 0 1px rgba(245,185,66,.4),0 8px 24px rgba(245,185,66,.2)}
 .off img{width:100%;aspect-ratio:1/1.36;object-fit:cover;display:block}
-.off .pk{position:absolute;top:0;left:0;right:0;padding:3px;text-align:center;font-size:9px;font-weight:800;background:linear-gradient(90deg,var(--gold),var(--or));color:#231402}
+.off .pk{position:absolute;bottom:34px;left:0;right:0;padding:3px;text-align:center;font-size:9px;font-weight:800;background:linear-gradient(90deg,var(--gold),var(--or));color:#231402}
 .off .oi{padding:6px}.off .oi b{display:block;font-size:11px;min-height:26px}.off .oi span{font-size:10px;color:var(--mut2)}
+.off .se{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:8px;border:1px solid var(--ln2);background:rgba(10,7,19,.88);color:var(--cy);font-size:13px;font-weight:800;cursor:pointer;z-index:3}
+.off .se.rr{right:36px;color:var(--gold)}
+.off .own{position:absolute;top:6px;left:6px;font-size:8.5px;font-weight:800;color:var(--cy);background:rgba(10,7,19,.85);border:1px solid rgba(34,211,238,.45);border-radius:5px;padding:1px 5px;z-index:3}
 .pack{display:flex;gap:10px;align-items:center;border:1px solid var(--ln2);border-radius:14px;padding:10px;margin-bottom:9px;background:linear-gradient(140deg,var(--s3),var(--s1));cursor:pointer}
 .pack img{width:60px;border-radius:9px;border:1px solid var(--ln2)}
 .pack .pm{flex:1;min-width:0}.pack .pm b{display:block;font-size:13px}.pack .pm span{font-size:11px;color:var(--mut)}
@@ -140,7 +143,7 @@ var CM={};CL.forEach(function(c){CM[c[0]]={n:c[1],a:c[2],c:c[3]}});
 var TI=["S","A","B","C","D","E","F"],TC={S:"#F5B942",A:"#A3E635",B:"#22D3EE",C:"#8B5CF6",D:"#F97316",E:"#EF4444",F:"#9F1239"},TN={S:"Отлично 100+",A:"Хорошо 90–99",B:"Выше среднего 80–89",C:"Средне 70–79",D:"Ниже среднего 60–69",E:"Плохо 40–59",F:"Слабо <40"};
 var NAT=typeof Android!=="undefined";
 var D={tiers:{},meta:{},stamp:"—",live:false,overlay:false,ocr:false,ocrErr:"",ocrEngine:"",lang:"rus"};
-var S={tab:"tiers",cls:"mage",q:"",tiers:{S:1,A:1,B:1,C:1,D:1,E:1,F:1},sort:"score",cost:"all",imgs:true,deck:[],draft:{phase:"setup",offer:[],packs:[]},status:"",diag:""};
+var S={tab:"tiers",cls:"mage",q:"",tiers:{S:1,A:1,B:1,C:1,D:1,E:1,F:1},sort:"score",cost:"all",imgs:true,deck:[],draft:{phase:"setup",offer:[],packs:[],man:[false,false,false]},status:"",diag:""};
 function N(s){return (s||"").toLowerCase().replace(/ё/g,"е").replace(/[^\p{L}\p{N} ]/gu," ").replace(/\s+/g," ").trim()}
 function E(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function M(n){return D.meta[N(n)]||{n:n,c:-1,t:"",r:"",q:"",k:"",s:"",m:[],x:"",id:""}}
@@ -159,17 +162,19 @@ function advise(n){var base=score(S.cls,n);if(base===null)base=60;var b=0,w=[],c
 if((c===2||c===3)&&cv[2]+cv[3]<6){b+=7;w.push("+7 кривая")}
 if(c>=6&&cv[6]+cv[7]>=4){b-=6;w.push("−6 перегруз")}
 if(m.t==="MINION"&&S.deck.filter(function(x){return M(x).t==="MINION"}).length<14){b+=5;w.push("+5 мало существ")}
-if(t.indexOf("уничтожает")>=0){b+=6;w.push("+6 ремувал")}
-if(t.indexOf("берете")>=0||t.indexOf("добирает")>=0){b+=5;w.push("+5 добор")}
+if(t.indexOf("уничтожает")>=0&&S.deck.filter(function(x){return N(M(x).x).indexOf("уничтожает")>=0}).length<3){b+=5;w.push("+5 ремувал")}
+if(t.indexOf("берете")>=0||t.indexOf("добирает")>=0){b+=4;w.push("+4 добор")}
 if((m.m||[]).indexOf("TAUNT")>=0&&S.deck.filter(function(x){return (M(x).m||[]).indexOf("TAUNT")>=0}).length<2){b+=3;w.push("+3 защита")}
-if(m.r&&S.deck.filter(function(x){return M(x).r===m.r}).length>=2){b+=6;w.push("+6 типовой пакет")}
-if(t.indexOf("к'тун")>=0&&S.deck.some(function(x){return N(x).indexOf("к тун око империи")>=0})){b+=8;w.push("+8 пакет богов")}
+if(m.r&&S.deck.filter(function(x){return M(x).r===m.r}).length>=2){b+=6;w.push("+6 пакет: "+m.r.toLowerCase())}
 if((m.m||[]).indexOf("DEATHRATTLE")>=0&&S.deck.filter(function(x){return (M(x).m||[]).indexOf("DEATHRATTLE")>=0}).length>=3){b+=4;w.push("+4 хрипы")}
+if(t.indexOf("к'тун")>=0&&S.deck.some(function(x){return N(x).indexOf("к тун око империи")>=0})){b+=8;w.push("+8 пакет богов")}
 return {n:n,base:base,adj:Math.max(1,base+b),why:w.join(" · ")}}
-function offers(){var p=pool(S.cls).filter(function(x){return cnt(x[0])<(M(x[0]).q==="LEGENDARY"?1:2)});if(p.length<3)p=pool(S.cls);var o=[],g=0;
-while(o.length<3&&g++<200){var r=Math.random(),w=r<.68?"COMMON":r<.88?"RARE":r<.97?"EPIC":"LEGENDARY";
+function oneOffer(){var p=pool(S.cls).filter(function(x){return cnt(x[0])<(M(x[0]).q==="LEGENDARY"?1:2)});if(p.length<3)p=pool(S.cls);
+for(var g=0;g<200;g++){var r=Math.random(),w=r<.68?"COMMON":r<.88?"RARE":r<.97?"EPIC":"LEGENDARY";
 var c=p.filter(function(x){var q=M(x[0]).q;return q===w||(w==="COMMON"&&(q==="FREE"||!q))});if(!c.length)c=p;
-var k=c[Math.floor(Math.random()*c.length)];if(k&&!o.some(function(y){return N(y[0])===N(k[0])}))o.push(k)}return o}
+var k=c[Math.floor(Math.random()*c.length)];if(k)return k}
+return p[0]}
+function offers(){return [oneOffer(),oneOffer(),oneOffer()]}
 function packs(){var p=pool(S.cls).concat(pool("any"));var L=p.filter(function(x){return M(x[0]).q==="LEGENDARY"});if(L.length<3)L=p.slice().sort(function(a,b){return b[1]-a[1]}).slice(0,12);
 var used=[],out=[],g=0;while(out.length<3&&g++<60){var l=L[Math.floor(Math.random()*L.length)];if(!l||used.some(function(u){return N(u)===N(l[0])}))continue;used.push(l[0]);
 var lm=M(l[0]);var inc=p.filter(function(x){var n=x[0];if(N(n)===N(l[0]))return false;var m=M(n);if(m.q==="LEGENDARY")return false;return (lm.r&&m.r===lm.r)||(lm.k&&m.k===lm.k)}).sort(function(a,b){return b[1]-a[1]}).slice(0,3).map(function(x){return x[0]});
@@ -197,24 +202,35 @@ if(d.phase==="setup"){if(!d.packs.length)d.packs=packs();
 h+='<p class="mini">Как в арене: возьмите стартовый пак (легендарка + связанные карты) или соберите начало вручную — затем пойдёт драфт по три карты.</p>';
 h+=d.packs.map(function(p,i){var a=art(p.lead);return '<div class="pack" data-pack="'+i+'">'+(S.imgs&&a?'<img src="'+a+'" onerror="this.style.display=\'none\'">':'')+'<div class="pm"><b>'+E(p.lead)+'</b><span>'+p.score+' · +'+p.inc.length+' карт</span><div class="inc">'+p.inc.map(function(n){var x=art(n);return S.imgs&&x?'<img src="'+x+'" onerror="this.style.display=\'none\'">':''}).join("")+'</div></div></div>'}).join("");
 h+='<div class="br"><button class="btn pri" id="dm">Собрать вручную</button><button class="btn" id="ds">Сразу к драфту</button></div></div>';V.innerHTML=h;
-V.querySelectorAll("[data-pack]").forEach(function(e){e.onclick=function(){var p=d.packs[+e.getAttribute("data-pack")];add(p.lead,true);p.inc.forEach(function(n){add(n,true)});d.phase="draft";d.offer=offers();toast("Пак добавлен");render()}});
+V.querySelectorAll("[data-pack]").forEach(function(e){e.onclick=function(){var p=d.packs[+e.getAttribute("data-pack")];add(p.lead,true);p.inc.forEach(function(n){add(n,true)});d.phase="draft";d.offer=offers();d.man=[false,false,false];toast("Пак добавлен");render()}});
 document.getElementById("dm").onclick=function(){manual(true)};
-document.getElementById("ds").onclick=function(){d.phase="draft";d.offer=offers();render()};return}
+document.getElementById("ds").onclick=function(){d.phase="draft";d.offer=offers();d.man=[false,false,false];render()};return}
 if(d.phase==="done"){h+='<div class="al ok"><span>✓</span><div>Драфт завершён. Средний балл '+power()+'.</div></div><div class="br"><button class="btn gold" id="dg">Колода</button><button class="btn" id="dn">Новый драфт</button></div></div>';V.innerHTML=h;
 document.getElementById("dg").onclick=function(){S.tab="deck";render()};
-document.getElementById("dn").onclick=function(){S.deck=[];save();S.draft={phase:"setup",offer:[],packs:[]};render()};return}
+document.getElementById("dn").onclick=function(){S.deck=[];save();S.draft={phase:"setup",offer:[],packs:[],man:[false,false,false]};render()};return}
 if(!d.offer.length)d.offer=offers();
+if(!d.man)d.man=[false,false,false];
 var sc=d.offer.map(function(p){return advise(p[0])}).sort(function(a,b){return b.adj-a.adj}),b=sc[0];
-h+='<div class="offers">'+d.offer.map(function(p){var n=p[0],x=sc.filter(function(y){return N(y.n)===N(n)})[0],a=art(n),best=N(n)===N(b.n);
-return '<div class="off'+(best?" best":"")+'" data-pick="'+E(n)+'">'+(best?'<span class="pk">БЕРИ</span>':'')+(S.imgs&&a?'<img src="'+a+'" onerror="this.style.display=\'none\'">':'')+'<div class="fall" style="background:linear-gradient(160deg,'+CM[S.cls].c+'55,#150E26)">'+E(n)+'</div><div class="oi"><b>'+E(n)+'</b><span style="color:'+TC[tier(x.adj)]+'">'+x.adj+'</span><span> · '+(cost(n)===null?"?":cost(n))+'</span></div></div>'}).join("")+'</div>';
+h+='<p class="mini" style="margin:0 0 8px">✎ на карточке — подставить свою карту для сравнения; ↺ — вернуть случайную. Тап по карточке — взять её в колоду.</p>';
+h+='<div class="offers">'+d.offer.map(function(p,i){var n=p[0],x=sc.filter(function(y){return N(y.n)===N(n)})[0],a=art(n),best=N(n)===N(b.n);
+return '<div class="off'+(best?" best":"")+'" data-pick="'+E(n)+'">'
++(best?'<span class="pk">БЕРИ</span>':'')
++(d.man[i]?'<span class="own">своя</span><button class="se rr" data-rr="'+i+'" title="Случайная">↺</button>':'')
++'<button class="se" data-edit="'+i+'" title="Своя карта">✎</button>'
++(S.imgs&&a?'<img src="'+a+'" onerror="this.style.display=\'none\'">':'')
++'<div class="fall" style="background:linear-gradient(160deg,'+CM[S.cls].c+'55,#150E26)">'+E(n)+'</div>'
++'<div class="oi"><b>'+E(n)+'</b><span style="color:'+TC[tier(x.adj)]+'">'+x.adj+'</span><span> · '+(cost(n)===null?"?":cost(n))+'</span></div></div>'}).join("")+'</div>';
 h+='<div class="mini" style="margin-top:12px"><b style="color:var(--gold)">Почему '+E(b.n)+'</b>: база '+b.base+(b.why?" · "+b.why:"")+'</div>';
 h+='<div class="br"><button class="btn" id="dr">Другие варианты</button><button class="btn" id="da">＋ Вручную</button><button class="btn dan" id="dx">Сброс</button></div></div>';
 h+='<div class="pan"><h3>В колоде<span>'+S.deck.length+'</span></h3><div class="chips">'+S.deck.map(function(n){return '<span>'+(cost(n)===null?"?":cost(n))+' · '+E(n)+'</span>'}).join("")+'</div></div>';
 V.innerHTML=h;
-V.querySelectorAll("[data-pick]").forEach(function(e){e.onclick=function(){var n=e.getAttribute("data-pick");if(add(n,true)){S.draft.offer=S.deck.length>=30?[]:offers();render()}}});
-document.getElementById("dr").onclick=function(){S.draft.offer=offers();render()};
+V.querySelectorAll("[data-pick]").forEach(function(e){e.onclick=function(ev){if(ev.target.closest(".se"))return;var n=e.getAttribute("data-pick");if(add(n,true)){S.draft.offer=S.deck.length>=30?[]:offers();S.draft.man=[false,false,false];render()}}});
+V.querySelectorAll("[data-edit]").forEach(function(bt){bt.onclick=function(ev){ev.stopPropagation();var i=+bt.getAttribute("data-edit");
+manual(false,function(name){d.offer[i]=[name, score(S.cls,name)||score("any",name)||60]; d.man[i]=true; render();});}});
+V.querySelectorAll("[data-rr]").forEach(function(bt){bt.onclick=function(ev){ev.stopPropagation();var i=+bt.getAttribute("data-rr");d.offer[i]=oneOffer();d.man[i]=false;render();}});
+document.getElementById("dr").onclick=function(){d.offer=offers();d.man=[false,false,false];render()};
 document.getElementById("da").onclick=function(){manual(false)};
-document.getElementById("dx").onclick=function(){S.deck=[];save();S.draft={phase:"setup",offer:[],packs:[]};render()}}
+document.getElementById("dx").onclick=function(){S.deck=[];save();S.draft={phase:"setup",offer:[],packs:[],man:[false,false,false]};render()}}
 function power(){var t=0;S.deck.forEach(function(n){t+=(score(S.cls,n)||60)});return S.deck.length?Math.round(t/S.deck.length):0}
 function vDeck(){var cv=curve(),mx=Math.max.apply(null,cv.concat([1])),cols=["#22D3EE","#8B5CF6","#D946EF","#F5B942","#F97316","#EF4444","#A3E635","#9F1239"];
 var h='<div class="pan"><h3>Колода · '+CM[S.cls].n+'<span>'+S.deck.length+'/30</span></h3><div class="prog"><i style="width:'+(S.deck.length/30*100)+'%"></i></div><div class="stat"><div><b style="color:var(--gold)">'+power()+'</b><span>БАЛЛ</span></div><div><b style="color:var(--cy)">'+S.deck.filter(function(n){return M(n).t==="MINION"}).length+'</b><span>СУЩЕСТВ</span></div><div><b style="color:var(--mag)">'+S.deck.filter(function(n){return M(n).t==="SPELL"}).length+'</b><span>ЗАКЛИНАНИЙ</span></div></div><div class="br"><button class="btn pri" id="ex">Экспорт</button><button class="btn dan" id="cl">Очистить</button></div></div>';
@@ -230,16 +246,16 @@ document.getElementById("cl").onclick=function(){var o=S.deck.slice();S.deck=[];
 V.querySelectorAll("[data-del]").forEach(function(b){b.onclick=function(){del(+b.getAttribute("data-del"))}})}
 function vOverlay(){
 var h='<div class="pan"><h3>Оверлей поверх игры<span id="ovstate">'+(D.overlay?"включён":"выключен")+'</span></h3>';
-h+='<p class="mini">Захват экрана → OCR названий трёх карт → подписи под ними: тир, балл с поправкой на вашу колоду и метка «БЕРИ». Управление игрой не перехватывается.</p>';
+h+='<p class="mini">Захват экрана → OCR названий трёх карт → подписи под ними: тир, балл с поправкой на колоду и метка «БЕРИ». Управление игрой не перехватывается.</p>';
 h+='<div class="br"><button class="btn '+(D.overlay?"dan":"pri")+'" id="ovt">'+(D.overlay?"Выключить оверлей":"Включить оверлей")+'</button><button class="btn" id="ovc">Калибровка ⚙</button></div></div>';
 h+='<div class="pan"><h3>OCR<span id="ocrstate">'+(D.ocr?("готов · "+D.ocrEngine):"не запущен")+'</span></h3>';
 h+='<div class="kv"><span>Язык: '+D.lang+'</span><span>rus: '+(NAT&&Android.ocrHas("rus")?"есть":"нет")+'</span><span>eng: '+(NAT&&Android.ocrHas("eng")?"есть":"нет")+'</span></div>';
 if(D.ocrErr)h+='<div class="al bad"><span>!</span><div>'+E(D.ocrErr)+'</div></div>';
-h+='<p class="mini">Если движок не принимает модель — скачайте <b>legacy</b>-версию: она совместима со старым API Tesseract, который используется в сборке.</p>';
+h+='<p class="mini">Если движок не принимает модель — скачайте <b>legacy</b>: она совместима со старым API Tesseract.</p>';
 h+='<div class="br"><button class="btn gold" id="dleg">rus legacy</button><button class="btn" id="dstd">rus std</button><button class="btn" id="dfast">rus fast</button></div>';
 h+='<div class="br"><button class="btn" id="den">eng legacy</button><button class="btn pri" id="otest">Проверить OCR</button><button class="btn" id="odiag">Диагностика</button></div>';
 h+='<div class="diag" id="diagbox">'+E(S.diag||"Нажмите «Диагностика»")+'</div></div>';
-h+='<div class="pan"><h3>Как настроить</h3><p class="mini">1. Скачайте модель и нажмите «Проверить OCR» — должно быть «готов».<br>2. Включите оверлей, разрешите показ поверх приложений и захват экрана.<br>3. Откройте Hearthstone, начните драфт.<br>4. На плавающей панели ⚙ → ползунками совместите голубые рамки с названиями трёх карт → «Готово».<br>5. ⚡ — анализ. Авто-анализ обновляет подписи сам.</p></div>';
+h+='<div class="pan"><h3>Как настроить</h3><p class="mini">1. Скачайте модель и «Проверить OCR» → «готов».<br>2. Включите оверлей, разрешите показ поверх и захват экрана.<br>3. Hearthstone → драфт.<br>4. На плавающей панели ⚙ → рамки на названия трёх карт → «Готово».<br>5. ⚡ — анализ; авто-анализ обновляет сам.</p></div>';
 h+='<div class="pan"><h3>Ручной импорт пула</h3><textarea id="imp" placeholder="HTML страницы heartharena.com/ru/tierlist"></textarea><div class="br"><button class="btn pri" id="impg">Импортировать</button></div></div>';
 V.innerHTML=h;
 document.getElementById("ovt").onclick=function(){if(!NAT)return toast("Только в APK");D.overlay?Android.stopOverlay():Android.startOverlay();setTimeout(poll,1500)};
@@ -265,15 +281,17 @@ h+='<div class="br"><button class="btn '+(cnt(n)?"dan":"pri")+'" id="sa">'+(cnt(
 SH.innerHTML=h;SW.classList.add("open");
 document.getElementById("sc").onclick=close;
 document.getElementById("sa").onclick=function(){cnt(n)?del(S.deck.lastIndexOf(n)):add(n);close()}}
-function manual(start){var p=pool(S.cls).concat(pool("any").filter(function(x){return !pool(S.cls).some(function(y){return N(y[0])===N(x[0])})}));
-var h='<h3>Ручной набор <span style="color:var(--gold)" id="mc">'+S.deck.length+'/30</span></h3><label class="search" style="margin-bottom:9px"><span style="color:var(--mut2)">⌕</span><input id="mq" placeholder="Поиск…"></label><div id="ml" style="max-height:46vh;overflow:auto"></div><div class="br"><button class="btn gold" id="ms">'+(start?"Начать драфт":"Готово")+'</button><button class="btn" id="mx">Закрыть</button></div>';
+function manual(start,onPick){var p=pool(S.cls).concat(pool("any").filter(function(x){return !pool(S.cls).some(function(y){return N(y[0])===N(x[0])})}));
+var h='<h3>'+(onPick?"Выберите карту в слот":(start?"Ручной набор · старт":"Ручной набор"))+' <span style="color:var(--gold)" id="mc">'+S.deck.length+'/30</span></h3><label class="search" style="margin-bottom:9px"><span style="color:var(--mut2)">⌕</span><input id="mq" placeholder="Поиск…"></label><div id="ml" style="max-height:46vh;overflow:auto"></div><div class="br"><button class="btn gold" id="ms"'+(onPick?' style="display:none"':'')+'>'+(start?"Начать драфт":"Готово")+'</button><button class="btn" id="mx">'+(onPick?"Отмена":"Закрыть")+'</button></div>';
 SH.innerHTML=h;SW.classList.add("open");
 function draw(q){var l=p.filter(function(x){return !q||N(x[0]).indexOf(q)>=0}).sort(function(a,b){return b[1]-a[1]}).slice(0,80);
-document.getElementById("ml").innerHTML=l.map(function(x){var c=cost(x[0]);return '<div class="mr"><span style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:radial-gradient(circle at 35% 30%,#7DD3FC,#1D4ED8);color:#fff">'+(c===null?"?":c)+'</span><span class="n">'+E(x[0])+'</span><span style="color:'+TC[tier(x[1])]+';font-size:11px;font-weight:800">'+x[1]+'</span><button data-m="'+E(x[0])+'">'+(cnt(x[0])?"−":"+")+'</button></div>'}).join("");
-document.querySelectorAll("[data-m]").forEach(function(b){b.onclick=function(){var n=b.getAttribute("data-m");cnt(n)?del(S.deck.lastIndexOf(n)):add(n,true);draw(N(document.getElementById("mq").value));document.getElementById("mc").textContent=S.deck.length+"/30"}})}
+document.getElementById("ml").innerHTML=l.map(function(x){var c=cost(x[0]);return '<div class="mr"><span style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:radial-gradient(circle at 35% 30%,#7DD3FC,#1D4ED8);color:#fff">'+(c===null?"?":c)+'</span><span class="n">'+E(x[0])+'</span><span style="color:'+TC[tier(x[1])]+';font-size:11px;font-weight:800">'+x[1]+'</span><button data-m="'+E(x[0])+'">'+(onPick?"✓":(cnt(x[0])?"−":"+"))+'</button></div>'}).join("");
+document.querySelectorAll("[data-m]").forEach(function(b){b.onclick=function(){var n=b.getAttribute("data-m");
+if(onPick){onPick(n);close();return;}
+cnt(n)?del(S.deck.lastIndexOf(n)):add(n,true);draw(N(document.getElementById("mq").value));document.getElementById("mc").textContent=S.deck.length+"/30"}})}
 draw("");document.getElementById("mq").oninput=function(e){draw(N(e.target.value))};
 document.getElementById("mx").onclick=close;
-document.getElementById("ms").onclick=function(){close();if(start){S.draft.phase="draft";S.draft.offer=offers()}render()}}
+document.getElementById("ms").onclick=function(){close();if(start){S.draft.phase="draft";S.draft.offer=offers();S.draft.man=[false,false,false]}render()}}
 function close(){SW.classList.remove("open")}
 var V=document.getElementById("view"),SW=document.getElementById("sw"),SH=document.getElementById("sh");
 function render(){document.getElementById("ctrl").style.display=S.tab==="tiers"?"":"none";
@@ -283,7 +301,7 @@ document.getElementById("dot").className="dot"+(D.live?" on":"");
 document.getElementById("ov").className="ib"+(D.overlay?" on":"");
 document.getElementById("sub").textContent=(D.live?"полный пул · ":"нет пула · ")+Object.keys(D.tiers).reduce(function(a,k){return a+D.tiers[k].length},0)+" оценок · "+D.stamp;
 if(S.tab==="tiers")vTiers();else if(S.tab==="draft")vDraft();else if(S.tab==="deck")vDeck();else vOverlay()}
-function buildCls(){var w=document.getElementById("cls");w.innerHTML="";CL.forEach(function(c){var b=document.createElement("button");b.className="cb"+(c[0]===S.cls?" on":"");b.style.color=c[0]===S.cls?c[3]:"";b.innerHTML='<i style="background:'+c[3]+'">'+c[2]+'</i>'+c[1];b.onclick=function(){S.cls=c[0];S.draft.packs=[];save();buildCls();render();window.scrollTo({top:0,behavior:"smooth"})};w.appendChild(b)})}
+function buildCls(){var w=document.getElementById("cls");w.innerHTML="";CL.forEach(function(c){var b=document.createElement("button");b.className="cb"+(c[0]===S.cls?" on":"");b.style.color=c[0]===S.cls?c[3]:"";b.innerHTML='<i style="background:'+c[3]+'">'+c[2]+'</i>'+c[1];b.onclick=function(){S.cls=c[0];S.draft.packs=[];S.draft.offer=[];S.draft.man=[false,false,false];save();buildCls();render();window.scrollTo({top:0,behavior:"smooth"})};w.appendChild(b)})}
 window.AC={setData:function(o){try{D=Object.assign(D,typeof o==="string"?JSON.parse(o):o)}catch(e){}render()},
 setDeck:function(a){try{S.deck=typeof a==="string"?JSON.parse(a):a}catch(e){}render()},
 setClass:function(c){if(CM[c]){S.cls=c;buildCls();render()}},
